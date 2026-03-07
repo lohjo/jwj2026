@@ -47,6 +47,11 @@ translate_from_english = None
 run_guard_detection = None
 run_insights = None
 log_to_clickhouse = None
+format_detection_response = None
+analyse_image_with_gemini = None
+transcribe_audio_deepgram = None
+synthesise_speech_elevenlabs = None
+analyse_video = None
 
 try:
     # Try common import forms first (underscore variant)
@@ -75,6 +80,11 @@ try:
         run_guard_detection = getattr(tools_module, 'run_guard_detection', None)
         run_insights = getattr(tools_module, 'run_insights', None)
         log_to_clickhouse = getattr(tools_module, 'log_to_clickhouse', None)
+        format_detection_response = getattr(tools_module, 'format_detection_response', None)
+        analyse_image_with_gemini = getattr(tools_module, 'analyse_image_with_gemini', None)
+        transcribe_audio_deepgram = getattr(tools_module, 'transcribe_audio_deepgram', None)
+        synthesise_speech_elevenlabs = getattr(tools_module, 'synthesise_speech_elevenlabs', None)
+        analyse_video = getattr(tools_module, 'analyse_video', None)
     else:
         logging.warning("Could not import translation/detection utilities from ai-agent-adk.tools")
 except Exception:
@@ -91,6 +101,31 @@ async def hello(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     except Exception:
         pass
     await update.message.reply_text(f'Hello {update.effective_user.first_name}')
+
+
+async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await update.message.reply_text(
+        "👋 Welcome to the AI Content Detection Bot!\n\n"
+        "Send me any content — text, image, audio, or video — and I'll analyse it "
+        "for signs of AI generation.\n\n"
+        "Commands:\n"
+        "/start — Show this welcome message\n"
+        "/help — Show usage instructions\n"
+        "/detect <text> — Analyse text directly\n"
+    )
+
+
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await update.message.reply_text(
+        "🤖 *AI Content Detection Bot — Help*\n\n"
+        "📝 *Text*: Send any text message to analyse\n"
+        "🖼️ *Image*: Send a photo for visual AI-signal analysis\n"
+        "🎤 *Audio*: Send a voice note or audio file for transcription + analysis\n"
+        "🎬 *Video*: Send a video for frame + audio analysis\n\n"
+        "All responses include a verdict, confidence score, and explanation.\n"
+        "Supported languages: EN, ZH, MS, TA, Singlish.",
+        parse_mode="Markdown",
+    )
 
 
 async def echo_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -204,23 +239,33 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
             # Translate explanation back if possible (may require runner)
             final_response = None
-            if insights_result is not None and translate_from_english is not None and source_lang != "en":
+            explanation = ""
+            if insights_result is not None:
+                explanation = insights_result.get('explanation', '')
+
+            # Use format_detection_response if available (§14)
+            if format_detection_response is not None and detection_result is not None:
+                final_response = format_detection_response(
+                    content_type="text",
+                    verdict=detection_result.get("label", "Unknown"),
+                    is_ai_generated=detection_result.get("is_ai_generated"),
+                    confidence=detection_result.get("confidence"),
+                    explanation=explanation or "",
+                )
+            elif explanation:
+                final_response = explanation
+            else:
+                # Run legacy detector as fallback
+                final_response = str(await asyncio.to_thread(detect_fake_text, english_text))
+
+            # Translate formatted response back if non-English
+            if source_lang != "en" and translate_from_english is not None and final_response:
                 try:
                     runner = get_runner()
                     if runner is not None:
-                        final_response = await translate_from_english(insights_result.get('explanation', ''), source_lang, runner, user_id, session_id)
-                    else:
-                        final_response = insights_result.get('explanation', '')
+                        final_response = await translate_from_english(final_response, source_lang, runner, user_id, session_id)
                 except Exception:
-                    logging.exception("translate_from_english failed; using English explanation")
-                    final_response = insights_result.get('explanation', '')
-            else:
-                # Fallback: use detection_result label or detect_fake_text output
-                if insights_result is not None:
-                    final_response = insights_result.get('explanation', '')
-                else:
-                    # Run legacy detector as fallback
-                    final_response = str(await asyncio.to_thread(detect_fake_text, english_text))
+                    logging.exception("translate_from_english failed; using English response")
 
             await update.message.reply_text(final_response)
         except Exception as e:
@@ -229,6 +274,304 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             await update.message.reply_text(result)
     else:
         await update.message.reply_text(f"You said: {raw_text}")
+
+
+async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle photo uploads: download → Gemini analysis → GUARD detection → formatted response."""
+    if not update.message or not update.message.photo:
+        return
+
+    user_id = str(update.effective_user.id)
+    if not await check_rate_limit(user_id, update):
+        return
+
+    try:
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+    except Exception:
+        pass
+
+    await update.message.reply_text("🔍 Analysing image, please wait...")
+
+    session_id = await get_or_create_session(user_id)
+
+    try:
+        # Step 1: Download photo (highest resolution = last in list)
+        photo = update.message.photo[-1]
+        file = await context.bot.get_file(photo.file_id)
+        os.makedirs("downloads", exist_ok=True)
+        image_path = f"downloads/{photo.file_id}.jpg"
+        await file.download_to_drive(image_path)
+
+        # Step 2: Gemini visual analysis
+        gemini_result = await analyse_image_with_gemini(image_path)
+
+        # Step 3: Language detection on OCR text
+        combined_text = gemini_result.get("caption", "")
+        ocr_text = gemini_result.get("ocr_text")
+        source_lang = "en"
+
+        if ocr_text and len(ocr_text) >= 20:
+            source_lang = detect_language(ocr_text)
+            if source_lang != "en" and translate_to_english is not None:
+                runner = get_runner()
+                if runner:
+                    ocr_text = await translate_to_english(ocr_text, source_lang, runner, user_id, session_id)
+
+        # Step 4: Combine for GUARD
+        guard_input = f"Image description: {combined_text}"
+        if ocr_text:
+            guard_input += f"\nExtracted text: {ocr_text}"
+        ai_signals = gemini_result.get("ai_signals", "")
+        if ai_signals:
+            guard_input += f"\nVisual AI signals: {ai_signals}"
+
+        # Step 5: GUARD detection
+        detection_result = await run_guard_detection(guard_input, content_type="image_caption", source_lang="en")
+
+        # Step 6: Gemini insights
+        insights_result = await run_insights(guard_input, detection_result) if run_insights else None
+
+        # Step 7: Format and translate response
+        explanation = (insights_result or {}).get("explanation", "Analysis unavailable.")
+        verdict = detection_result.get("label", "Unknown")
+
+        response = format_detection_response(
+            content_type="image",
+            verdict=verdict,
+            is_ai_generated=detection_result.get("is_ai_generated"),
+            confidence=detection_result.get("confidence"),
+            explanation=explanation,
+            caption=combined_text,
+            ocr_text=gemini_result.get("ocr_text"),
+            ai_signals=ai_signals,
+        )
+
+        # Translate if non-English user
+        if source_lang != "en" and translate_from_english is not None:
+            runner = get_runner()
+            if runner:
+                response = await translate_from_english(response, source_lang, runner, user_id, session_id)
+
+        await update.message.reply_text(response, parse_mode="Markdown")
+
+        # Log
+        if log_to_clickhouse:
+            asyncio.create_task(asyncio.to_thread(
+                log_to_clickhouse, user_id, "image", combined_text[:200],
+                verdict, detection_result.get("confidence"), explanation
+            ))
+
+        # Cleanup
+        if os.path.exists(image_path):
+            os.remove(image_path)
+
+    except Exception as e:
+        logging.exception("Error in handle_photo")
+        await update.message.reply_text(f"❌ Image analysis failed: {e}")
+
+
+async def handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle audio/voice uploads: download → Deepgram STT → GUARD detection → TTS response."""
+    if not update.message:
+        return
+
+    audio = update.message.voice or update.message.audio
+    if not audio:
+        return
+
+    user_id = str(update.effective_user.id)
+    if not await check_rate_limit(user_id, update):
+        return
+
+    try:
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+    except Exception:
+        pass
+
+    await update.message.reply_text("🎤 Transcribing audio, please wait...")
+
+    session_id = await get_or_create_session(user_id)
+
+    try:
+        # Step 1: Download audio
+        file = await context.bot.get_file(audio.file_id)
+        os.makedirs("downloads", exist_ok=True)
+        ext = ".ogg" if update.message.voice else ".mp3"
+        audio_path = f"downloads/{audio.file_id}{ext}"
+        await file.download_to_drive(audio_path)
+
+        # Step 2: Transcribe with Deepgram
+        transcript_result = await transcribe_audio_deepgram(audio_path)
+        transcript = transcript_result.get("transcript", "")
+
+        if not transcript:
+            await update.message.reply_text("⚠️ Could not transcribe audio. Please try sending a clearer recording.")
+            return
+
+        # Step 3: Detect language
+        source_lang = transcript_result.get("language", "en")
+        if len(transcript) >= 20:
+            source_lang = detect_language(transcript) or source_lang
+
+        # Step 4: Translate to English
+        english_text = transcript
+        if source_lang != "en" and translate_to_english is not None:
+            runner = get_runner()
+            if runner:
+                english_text = await translate_to_english(transcript, source_lang, runner, user_id, session_id)
+
+        # Step 5: GUARD detection
+        detection_result = await run_guard_detection(english_text, content_type="audio_transcript", source_lang=source_lang)
+
+        # Step 6: Insights
+        insights_result = await run_insights(english_text, detection_result) if run_insights else None
+
+        # Step 7: Format response
+        explanation = (insights_result or {}).get("explanation", "Analysis unavailable.")
+        verdict = detection_result.get("label", "Unknown")
+
+        response = format_detection_response(
+            content_type="audio",
+            verdict=verdict,
+            is_ai_generated=detection_result.get("is_ai_generated"),
+            confidence=detection_result.get("confidence"),
+            explanation=explanation,
+            transcript=transcript,
+        )
+
+        # Translate back
+        if source_lang != "en" and translate_from_english is not None:
+            runner = get_runner()
+            if runner:
+                response = await translate_from_english(response, source_lang, runner, user_id, session_id)
+
+        await update.message.reply_text(response, parse_mode="Markdown")
+
+        # Step 8: Optional TTS voice reply
+        try:
+            tts_path = f"downloads/tts_{audio.file_id}.mp3"
+            tts_result = await synthesise_speech_elevenlabs(response[:1000], tts_path)
+            if tts_result.get("success"):
+                with open(tts_path, "rb") as voice_file:
+                    await update.message.reply_voice(voice=voice_file)
+                os.remove(tts_path)
+        except Exception:
+            logging.info("TTS reply skipped — ElevenLabs not available or failed")
+
+        # Log
+        if log_to_clickhouse:
+            asyncio.create_task(asyncio.to_thread(
+                log_to_clickhouse, user_id, "audio", transcript[:200],
+                verdict, detection_result.get("confidence"), explanation
+            ))
+
+        # Cleanup
+        if os.path.exists(audio_path):
+            os.remove(audio_path)
+
+    except Exception as e:
+        logging.exception("Error in handle_audio")
+        await update.message.reply_text(f"❌ Audio analysis failed: {e}")
+
+
+async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle video uploads: download → frame analysis + audio STT → GUARD → response."""
+    if not update.message:
+        return
+
+    video = update.message.video or update.message.video_note
+    if not video:
+        return
+
+    user_id = str(update.effective_user.id)
+    if not await check_rate_limit(user_id, update):
+        return
+
+    try:
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="upload_video")
+    except Exception:
+        pass
+
+    await update.message.reply_text("🎬 Analysing video, please wait... This may take a moment.")
+
+    session_id = await get_or_create_session(user_id)
+
+    try:
+        # Step 1: Download
+        file = await context.bot.get_file(video.file_id)
+        os.makedirs("downloads", exist_ok=True)
+        video_path = f"downloads/{video.file_id}.mp4"
+        await file.download_to_drive(video_path)
+
+        # Step 2: Analyse video (frames + audio)
+        video_result = await analyse_video(video_path)
+
+        if video_result.get("error") and not video_result.get("frame_descriptions"):
+            await update.message.reply_text(f"⚠️ Video analysis failed: {video_result['error']}")
+            return
+
+        # Step 3: Combine analysis
+        frame_text = " | ".join(video_result.get("frame_descriptions", []))
+        audio_text = video_result.get("audio_transcript", "")
+        ai_signals = video_result.get("ai_signals", "")
+
+        guard_input = f"Video frame descriptions: {frame_text}"
+        if audio_text:
+            guard_input += f"\nAudio transcript: {audio_text}"
+        if ai_signals:
+            guard_input += f"\nVisual AI signals: {ai_signals}"
+
+        # Step 4: Language detection on audio transcript
+        source_lang = "en"
+        if audio_text and len(audio_text) >= 20:
+            source_lang = detect_language(audio_text)
+            if source_lang != "en" and translate_to_english is not None:
+                runner = get_runner()
+                if runner:
+                    audio_text_en = await translate_to_english(audio_text, source_lang, runner, user_id, session_id)
+                    guard_input = guard_input.replace(audio_text, audio_text_en)
+
+        # Step 5: GUARD detection
+        detection_result = await run_guard_detection(guard_input, content_type="video_transcript", source_lang="en")
+
+        # Step 6: Insights
+        insights_result = await run_insights(guard_input, detection_result) if run_insights else None
+        explanation = (insights_result or {}).get("explanation", "Analysis unavailable.")
+        verdict = detection_result.get("label", "Unknown")
+
+        # Step 7: Format response
+        response = format_detection_response(
+            content_type="video",
+            verdict=verdict,
+            is_ai_generated=detection_result.get("is_ai_generated"),
+            confidence=detection_result.get("confidence"),
+            explanation=explanation,
+            frames_checked=video_result.get("frames_checked", 0),
+            transcript=audio_text,
+            ai_signals=ai_signals,
+        )
+
+        if source_lang != "en" and translate_from_english is not None:
+            runner = get_runner()
+            if runner:
+                response = await translate_from_english(response, source_lang, runner, user_id, session_id)
+
+        await update.message.reply_text(response, parse_mode="Markdown")
+
+        # Log
+        if log_to_clickhouse:
+            asyncio.create_task(asyncio.to_thread(
+                log_to_clickhouse, user_id, "video", frame_text[:200],
+                verdict, detection_result.get("confidence"), explanation
+            ))
+
+        # Cleanup
+        if os.path.exists(video_path):
+            os.remove(video_path)
+
+    except Exception as e:
+        logging.exception("Error in handle_video")
+        await update.message.reply_text(f"❌ Video analysis failed: {e}")
 
 
 async def detect_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

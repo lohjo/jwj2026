@@ -854,3 +854,105 @@ def log_to_clickhouse(
         return {"status": "logged"}
     except Exception as e:
         return {"status": "failed", "error": str(e)}
+
+
+# ── Message Format (§14) ─────────────────────────────────────────────────────
+
+def format_detection_response(
+    content_type: str,
+    verdict: str,
+    is_ai_generated: bool | None,
+    confidence: float | None,
+    explanation: str,
+    caption: str = "",
+    ocr_text: str | None = None,
+    transcript: str = "",
+    ai_signals: str = "",
+    frames_checked: int = 0,
+) -> str:
+    """
+    Format a detection result into a user-friendly Telegram message.
+
+    Args:
+        content_type: One of 'text', 'image', 'audio', 'video'.
+        verdict: Raw verdict label from GUARD.
+        is_ai_generated: Boolean detection result (True/False/None).
+        confidence: Confidence score 0.0-1.0, or None.
+        explanation: Plain-language explanation from insights model.
+        caption: Image caption (for image content type).
+        ocr_text: Extracted text from image OCR (for image content type).
+        transcript: Audio/video transcript text.
+        ai_signals: Detected AI-generation signals.
+        frames_checked: Number of video frames analysed.
+
+    Returns:
+        Formatted Markdown string for Telegram.
+    """
+    # Verdict emoji
+    if is_ai_generated is True:
+        verdict_emoji = "🔴"
+        verdict_label = "Likely AI-Generated"
+    elif is_ai_generated is False:
+        verdict_emoji = "🟢"
+        verdict_label = "Likely Human-Generated"
+    else:
+        verdict_emoji = "🟡"
+        verdict_label = "Inconclusive"
+
+    # Content type header
+    type_icons = {"text": "📝", "image": "🖼️", "audio": "🎤", "video": "🎬"}
+    type_icon = type_icons.get(content_type, "📄")
+
+    # Confidence bar
+    if confidence is not None:
+        pct = int(confidence * 100)
+        filled = int(confidence * 10)
+        bar = "█" * filled + "░" * (10 - filled)
+        confidence_line = f"*Confidence*: {bar} {pct}%"
+    else:
+        confidence_line = "*Confidence*: Not available"
+
+    # Build message
+    lines = []
+    lines.append(f"{type_icon} *{content_type.upper()} ANALYSIS*")
+    lines.append("")
+    lines.append(f"{verdict_emoji} *Verdict*: {verdict_label}")
+    lines.append(confidence_line)
+    lines.append("")
+
+    # Content preview section (varies by type)
+    if content_type == "image":
+        if caption:
+            lines.append(f"🔎 *Image Content*: {caption[:150]}")
+        if ocr_text:
+            lines.append(f"📖 *Detected Text*: _{ocr_text[:150]}_")
+        if ai_signals:
+            lines.append(f"⚠️ *Visual Signals*: {ai_signals[:200]}")
+        lines.append("")
+    elif content_type == "audio":
+        if transcript:
+            lines.append(f"📝 *Transcript*: _{transcript[:200]}_")
+        lines.append("")
+    elif content_type == "video":
+        if frames_checked:
+            lines.append(f"🎞️ *Frames Analysed*: {frames_checked}")
+        if transcript:
+            lines.append(f"📝 *Audio Transcript*: _{transcript[:150]}_")
+        if ai_signals:
+            lines.append(f"⚠️ *Visual Signals*: {ai_signals[:200]}")
+        lines.append("")
+
+    # Explanation
+    lines.append("💡 *Analysis*")
+    clean_explanation = explanation.strip()
+    if len(clean_explanation) > 500:
+        clean_explanation = clean_explanation[:497] + "..."
+    lines.append(clean_explanation)
+    lines.append("")
+
+    # Footer
+    lines.append("─" * 20)
+    lines.append("🤖 _Powered by SEA-LION GUARD + Gemini_")
+    lines.append("_This is an automated analysis. Use your own judgement._")
+
+    return "\n".join(lines)
