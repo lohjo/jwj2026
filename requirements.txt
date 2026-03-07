@@ -1,0 +1,14 @@
+python-telegram-bot==22.6
+fastapi
+uvicorn
+Pillow
+google-genai
+google-adk
+python-dotenv
+langdetect
+httpx
+deepgram-sdk>=3.0.0
+elevenlabs>=1.0.0
+opencv-python-headless
+imagehash
+pydub
