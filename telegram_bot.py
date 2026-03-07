@@ -388,9 +388,13 @@ def start_bot():
 
     app = ApplicationBuilder().token(token).build()
     app.add_handler(CommandHandler("hello", hello))
-    app.add_handler(CommandHandler("echo", echo_command))
+    app.add_handler(CommandHandler("start", start_command))
+    app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("detect", detect_command))
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_text))
+    app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
+    app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, handle_audio))
+    app.add_handler(MessageHandler(filters.VIDEO | filters.VIDEO_NOTE, handle_video))
 
     logging.info("Starting Telegram bot polling...")
     app.run_polling()
