@@ -5,7 +5,7 @@ import asyncio
 import importlib
 import datetime
 from pathlib import Path
-from dotenv import load_dotenv
+from dotenv import find_dotenv, load_dotenv
 
 from google.adk.sessions import InMemorySessionService
 from google.adk.runners import Runner
@@ -17,11 +17,41 @@ from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, Messa
 # Initialize logging early so we can log .env loading and failures
 logging.basicConfig(level=logging.INFO)
 
+# Ensure project root is on sys.path so local modules (image_detector, etc.) import
+_project_root = Path(__file__).resolve().parent
+if str(_project_root) not in sys.path:
+    sys.path.insert(0, str(_project_root))
+
 # Load .env early so TELEGRAM_TOKEN (or TELEGRAM_BOT_TOKEN) can be resolved once at import time
-# Prefer an explicit path relative to the repository: project root (two levels up from this file).
-_env_path = Path(__file__).resolve().parent / ".env"
-load_dotenv(dotenv_path=_env_path, override=True)
-logging.info(f"Loaded .env from: {_env_path} (exists={_env_path.exists()})")
+# Try several candidate locations (project root, ai_agent_adk package-local, repo root),
+# then fall back to find_dotenv() if none found.
+project_root = Path(__file__).resolve().parent
+candidates = [
+    project_root / '.env',
+    project_root / 'ai_agent_adk' / '.env',
+    project_root.parent / '.env',
+]
+loaded_env = False
+for p in candidates:
+    try:
+        p_resolved = p.resolve()
+    except Exception:
+        p_resolved = p
+    logging.info(f"Checking .env candidate: {p_resolved} (exists={p_resolved.exists()})")
+    if p_resolved.exists():
+        load_dotenv(dotenv_path=p_resolved, override=True)
+        logging.info(f"Loaded .env from: {p_resolved}")
+        loaded_env = True
+        break
+
+if not loaded_env:
+    # Fallback to find_dotenv() which searches parent directories
+    found = find_dotenv()
+    if found:
+        load_dotenv(dotenv_path=found, override=True)
+        logging.info(f"Loaded .env from: {found}")
+    else:
+        logging.info("No .env file found in candidate locations; relying on environment variables")
 
 # Fail fast if critical API keys are missing to avoid silent 401s from downstream clients
 if not os.environ.get("OPENAI_API_KEY"):
@@ -39,6 +69,12 @@ try:
 except Exception:
     detect_fake_text = None
 
+# Import image manipulation detector
+try:
+    from image_detector import detect_image_manipulation
+except Exception:
+    detect_image_manipulation = None
+
 # Import translation and detection utilities
 # Handle hyphenated module name using importlib
 detect_language = None
@@ -52,25 +88,38 @@ analyse_image_with_gemini = None
 transcribe_audio_deepgram = None
 synthesise_speech_elevenlabs = None
 analyse_video = None
+detect_misinformation = None
 
 try:
     # Try common import forms first (underscore variant)
+    # Ensure project root is on sys.path so local `ai_agent_adk` package is importable
+    project_root = Path(__file__).resolve().parent
+    if str(project_root) not in sys.path:
+        sys.path.insert(0, str(project_root))
     try:
         tools_module = importlib.import_module('ai_agent_adk.tools')
     except Exception:
-        # Fallback: load the tools.py directly by path (handles hyphenated directory)
+        # Fallback: try to load tools.py directly by path to avoid executing
+        # package-level side effects in ai_agent_adk.__init__ (which may import agent.py)
         try:
             import importlib.util
-            pkg_dir = os.path.join(os.path.dirname(__file__), 'ai-agent-adk')
+            # First try underscore directory (ai_agent_adk)
+            pkg_dir = os.path.join(os.path.dirname(__file__), 'ai_agent_adk')
             tools_path = os.path.join(pkg_dir, 'tools.py')
+            if not os.path.exists(tools_path):
+                # Fallback to hyphenated directory name used by some forks
+                pkg_dir = os.path.join(os.path.dirname(__file__), 'ai-agent-adk')
+                tools_path = os.path.join(pkg_dir, 'tools.py')
+
             if os.path.exists(tools_path):
                 spec = importlib.util.spec_from_file_location('ai_agent_adk.tools', tools_path)
                 module = importlib.util.module_from_spec(spec)
                 spec.loader.exec_module(module)
                 tools_module = module
             else:
-                raise ImportError("ai-agent-adk/tools.py not found")
+                raise ImportError("ai_agent_adk/tools.py not found in expected locations")
         except Exception:
+            logging.exception("Failed to load ai_agent_adk.tools via fallback path")
             tools_module = None
 
     if tools_module:
@@ -85,6 +134,7 @@ try:
         transcribe_audio_deepgram = getattr(tools_module, 'transcribe_audio_deepgram', None)
         synthesise_speech_elevenlabs = getattr(tools_module, 'synthesise_speech_elevenlabs', None)
         analyse_video = getattr(tools_module, 'analyse_video', None)
+        detect_misinformation = getattr(tools_module, 'detect_misinformation', None)
     else:
         logging.warning("Could not import translation/detection utilities from ai-agent-adk.tools")
 except Exception:
@@ -124,7 +174,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "🎬 *Video*: Send a video for frame + audio analysis\n\n"
         "All responses include a verdict, confidence score, and explanation.\n"
         "Supported languages: EN, ZH, MS, TA, Singlish.",
-        parse_mode="Markdown",
+        parse_mode="HTML",
     )
 
 
@@ -211,14 +261,33 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
                 except Exception:
                     logging.exception("translate_to_english failed; using original text")
 
-            # FIX 2: Detection pipeline (async guard + insights)
+            # FIX 2: Detection pipeline — GUARD + misinformation concurrently
             detection_result = None
             insights_result = None
+            misinfo_result = None
+
+            coros = []
             if run_guard_detection is not None:
-                detection_result = await run_guard_detection(english_text, source_lang=source_lang)
+                coros.append(run_guard_detection(english_text, source_lang=source_lang))
+            else:
+                coros.append(asyncio.coroutine(lambda: None)() if False else asyncio.sleep(0))
+
+            if detect_misinformation is not None:
+                coros.append(detect_misinformation(english_text, context_description="text message"))
+            else:
+                coros.append(asyncio.sleep(0))
+
+            gathered = await asyncio.gather(*coros, return_exceptions=True)
+            if run_guard_detection is not None and not isinstance(gathered[0], BaseException):
+                detection_result = gathered[0]
+            if detect_misinformation is not None and not isinstance(gathered[1], BaseException):
+                misinfo_result = gathered[1]
 
             if run_insights is not None:
-                insights_result = await run_insights(english_text, detection_result or {})
+                insights_result = await run_insights(
+                    english_text, detection_result or {},
+                    misinformation_result=misinfo_result,
+                )
 
             # FIX 3: Defer logging (background) and translate back concurrently where possible
             if log_to_clickhouse is not None:
@@ -226,12 +295,20 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
                     asyncio.create_task(
                         asyncio.to_thread(
                             log_to_clickhouse,
-                            user_id,
-                            "text",
-                            raw_text[:200],
-                            (detection_result or {}).get('label', ''),
-                            (detection_result or {}).get('confidence'),
-                            (insights_result or {}).get('explanation', '')
+                            {
+                                "user_id": user_id,
+                                "session_id": session_id,
+                                "content_type": "text",
+                                "source_language": source_lang,
+                                "content_preview": raw_text[:500],
+                                "guard_label": (detection_result or {}).get('label', ''),
+                                "guard_verdict": "ai_generated" if (detection_result or {}).get('is_ai_generated') else "human_generated" if (detection_result or {}).get('is_ai_generated') is False else "inconclusive",
+                                "guard_confidence": (detection_result or {}).get('confidence'),
+                                "misinfo_detected": (misinfo_result or {}).get('misinformation_detected', False),
+                                "misinfo_type": (misinfo_result or {}).get('misinformation_type', 'none'),
+                                "explanation": (insights_result or {}).get('explanation', ''),
+                                "is_harmful": (insights_result or {}).get('is_harmful', False),
+                            }
                         )
                     )
                 except Exception:
@@ -267,7 +344,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
                 except Exception:
                     logging.exception("translate_from_english failed; using English response")
 
-            await update.message.reply_text(final_response)
+            await update.message.reply_text(final_response, parse_mode="HTML")
         except Exception as e:
             result = f"Detection error: {e}"
             logging.exception("Error in handle_text pipeline")
@@ -325,11 +402,30 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         if ai_signals:
             guard_input += f"\nVisual AI signals: {ai_signals}"
 
-        # Step 5: GUARD detection
-        detection_result = await run_guard_detection(guard_input, content_type="image_caption", source_lang="en")
+        # Step 5: Run GUARD + misinformation + image manipulation concurrently
+        coros = [
+            run_guard_detection(guard_input, content_type="image_caption", source_lang="en"),
+        ]
+        if detect_misinformation is not None:
+            coros.append(detect_misinformation(guard_input, context_description="image with OCR text"))
+        else:
+            coros.append(asyncio.sleep(0))
+        if detect_image_manipulation is not None:
+            coros.append(detect_image_manipulation(image_path))
+        else:
+            coros.append(asyncio.sleep(0))
 
-        # Step 6: Gemini insights
-        insights_result = await run_insights(guard_input, detection_result) if run_insights else None
+        gathered = await asyncio.gather(*coros, return_exceptions=True)
+        detection_result = gathered[0] if not isinstance(gathered[0], BaseException) else {}
+        misinfo_result = gathered[1] if not isinstance(gathered[1], BaseException) else None
+        manip_result = gathered[2] if not isinstance(gathered[2], BaseException) else None
+
+        # Step 6: Gemini insights with all detection results
+        insights_result = await run_insights(
+            guard_input, detection_result,
+            misinformation_result=misinfo_result,
+            manipulation_result=manip_result,
+        ) if run_insights else None
 
         # Step 7: Format and translate response
         explanation = (insights_result or {}).get("explanation", "Analysis unavailable.")
@@ -352,13 +448,27 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             if runner:
                 response = await translate_from_english(response, source_lang, runner, user_id, session_id)
 
-        await update.message.reply_text(response, parse_mode="Markdown")
+        await update.message.reply_text(response, parse_mode="HTML")
 
         # Log
         if log_to_clickhouse:
             asyncio.create_task(asyncio.to_thread(
-                log_to_clickhouse, user_id, "image", combined_text[:200],
-                verdict, detection_result.get("confidence"), explanation
+                log_to_clickhouse,
+                {
+                    "user_id": user_id,
+                    "session_id": session_id,
+                    "content_type": "image",
+                    "content_preview": combined_text[:500],
+                    "guard_label": verdict,
+                    "guard_verdict": "ai_generated" if detection_result.get('is_ai_generated') else "human_generated" if detection_result.get('is_ai_generated') is False else "inconclusive",
+                    "guard_confidence": detection_result.get("confidence"),
+                    "misinfo_detected": (misinfo_result or {}).get('misinformation_detected', False),
+                    "misinfo_type": (misinfo_result or {}).get('misinformation_type', 'none'),
+                    "manipulation_detected": (manip_result or {}).get('manipulation_detected', False),
+                    "manipulation_type": (manip_result or {}).get('manipulation_type', 'none'),
+                    "explanation": explanation,
+                    "is_harmful": (insights_result or {}).get('is_harmful', False),
+                }
             ))
 
         # Cleanup
@@ -445,7 +555,7 @@ async def handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             if runner:
                 response = await translate_from_english(response, source_lang, runner, user_id, session_id)
 
-        await update.message.reply_text(response, parse_mode="Markdown")
+        await update.message.reply_text(response, parse_mode="HTML")
 
         # Step 8: Optional TTS voice reply
         try:
@@ -461,8 +571,19 @@ async def handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         # Log
         if log_to_clickhouse:
             asyncio.create_task(asyncio.to_thread(
-                log_to_clickhouse, user_id, "audio", transcript[:200],
-                verdict, detection_result.get("confidence"), explanation
+                log_to_clickhouse,
+                {
+                    "user_id": user_id,
+                    "session_id": session_id,
+                    "content_type": "audio",
+                    "source_language": source_lang,
+                    "content_preview": transcript[:500],
+                    "guard_label": verdict,
+                    "guard_verdict": "ai_generated" if detection_result.get('is_ai_generated') else "human_generated" if detection_result.get('is_ai_generated') is False else "inconclusive",
+                    "guard_confidence": detection_result.get("confidence"),
+                    "explanation": explanation,
+                    "is_harmful": (insights_result or {}).get('is_harmful', False),
+                }
             ))
 
         # Cleanup
@@ -556,13 +677,24 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             if runner:
                 response = await translate_from_english(response, source_lang, runner, user_id, session_id)
 
-        await update.message.reply_text(response, parse_mode="Markdown")
+        await update.message.reply_text(response)
 
         # Log
         if log_to_clickhouse:
             asyncio.create_task(asyncio.to_thread(
-                log_to_clickhouse, user_id, "video", frame_text[:200],
-                verdict, detection_result.get("confidence"), explanation
+                log_to_clickhouse,
+                {
+                    "user_id": user_id,
+                    "session_id": session_id,
+                    "content_type": "video",
+                    "source_language": source_lang,
+                    "content_preview": frame_text[:500],
+                    "guard_label": verdict,
+                    "guard_verdict": "ai_generated" if detection_result.get('is_ai_generated') else "human_generated" if detection_result.get('is_ai_generated') is False else "inconclusive",
+                    "guard_confidence": detection_result.get("confidence"),
+                    "explanation": explanation,
+                    "is_harmful": (insights_result or {}).get('is_harmful', False),
+                }
             ))
 
         # Cleanup
@@ -572,6 +704,76 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     except Exception as e:
         logging.exception("Error in handle_video")
         await update.message.reply_text(f"❌ Video analysis failed: {e}")
+
+
+async def research_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/research <query> — Search the web, summarise, and reply with findings."""
+    args = context.args if hasattr(context, "args") else []
+    query = " ".join(args).strip()
+    if not query:
+        await update.message.reply_text("Usage: /research <your question>")
+        return
+
+    user_id = str(update.effective_user.id)
+    if not await check_rate_limit(user_id, update):
+        return
+
+    try:
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+    except Exception:
+        pass
+
+    await update.message.reply_text("🔍 Researching, please wait...")
+
+    try:
+        from research_agent import research as do_research
+
+        result = await do_research(query)
+
+        if result.cache_hit and result.skill_path:
+            from pathlib import Path
+            skill_text = Path(result.skill_path).read_text(encoding="utf-8")
+            preview = skill_text[:800]
+            await update.message.reply_text(
+                f"📚 <b>Cached Skill Card</b>\n\n<pre>{preview}</pre>",
+                parse_mode="HTML",
+            )
+        elif result.summary_path:
+            from pathlib import Path
+            summary_text = Path(result.summary_path).read_text(encoding="utf-8")
+            preview = summary_text[:800]
+            await update.message.reply_text(
+                f"📝 <b>Research Summary</b>\n\n{preview}\n\n"
+                f"({len(result.sources)} sources analysed)",
+                parse_mode="HTML",
+            )
+            # Send full summary as file attachment
+            with open(result.summary_path, "rb") as f:
+                await context.bot.send_document(
+                    chat_id=update.effective_chat.id,
+                    document=f,
+                    filename=Path(result.summary_path).name,
+                )
+        else:
+            await update.message.reply_text("⚠️ No results found for your query.")
+
+        # Log research event to ClickHouse
+        if log_to_clickhouse:
+            session_id = await get_or_create_session(user_id)
+            asyncio.create_task(asyncio.to_thread(
+                log_to_clickhouse,
+                {
+                    "user_id": user_id,
+                    "session_id": session_id,
+                    "content_type": "text",
+                    "content_preview": query[:500],
+                    "guard_verdict": "human_generated",
+                    "explanation": f"Research query: {query}",
+                }
+            ))
+    except Exception as exc:
+        logging.exception("Error in research_command")
+        await update.message.reply_text(f"❌ Research failed: {exc}")
 
 
 async def detect_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -608,14 +810,23 @@ async def detect_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             insights_result = await run_insights(text, detection_result) if run_insights is not None else None
             # Schedule logging in background
             if log_to_clickhouse is not None:
-                asyncio.create_task(asyncio.to_thread(log_to_clickhouse, user_id, "text", text[:200], detection_result.get('label', ''), detection_result.get('confidence'), (insights_result or {}).get('explanation', '')))
+                asyncio.create_task(asyncio.to_thread(log_to_clickhouse, {
+                    "user_id": user_id,
+                    "content_type": "text",
+                    "content_preview": text[:500],
+                    "guard_label": detection_result.get('label', ''),
+                    "guard_verdict": "ai_generated" if detection_result.get('is_ai_generated') else "human_generated" if detection_result.get('is_ai_generated') is False else "inconclusive",
+                    "guard_confidence": detection_result.get('confidence'),
+                    "explanation": (insights_result or {}).get('explanation', ''),
+                    "is_harmful": (insights_result or {}).get('is_harmful', False),
+                }))
             final = (insights_result or {}).get('explanation') or str(detection_result)
         else:
             final = str(await asyncio.to_thread(detect_fake_text, text))
     except Exception as e:
         final = f"Detection error: {e}"
 
-    await update.message.reply_text(final)
+    await update.message.reply_text(final, parse_mode="HTML")
 
 
 def get_token() -> str:
@@ -734,6 +945,7 @@ def start_bot():
     app.add_handler(CommandHandler("start", start_command))
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("detect", detect_command))
+    app.add_handler(CommandHandler("research", research_command))
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_text))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, handle_audio))

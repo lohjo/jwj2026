@@ -1,5 +1,10 @@
 import os
 from config import GEMINI_API_KEY, MODEL_NAME
+try:
+    from ai_agent_adk.tools import escape_for_telegram
+except Exception:
+    def escape_for_telegram(s: str) -> str:
+        return s
 
 
 def detect_fake_text(text: str) -> str:
@@ -49,8 +54,16 @@ Message:
         
         response = model.generate_content(prompt)
         
-        return _extract_text(response)
+        out = _extract_text(response)
+        try:
+            return escape_for_telegram(out)
+        except Exception:
+            return out
         
     except Exception as e:
         # This will catch configuration errors, network issues, or API errors.
-        return f"Gemini analysis error: {e}"
+        err = f"Gemini analysis error: {e}"
+        try:
+            return escape_for_telegram(err)
+        except Exception:
+            return err

@@ -3,14 +3,19 @@ import asyncio
 import httpx
 import re
 import json
+import html
+import logging
 from dotenv import load_dotenv
 import os
+from pathlib import Path
 from typing import Optional, List, Dict, Any
 from urllib.parse import urljoin
 from langdetect import detect, LangDetectException
 from google.genai.types import Content, Part
 
-load_dotenv()
+# Load .env with override=True so project keys take precedence over system env vars
+_env_path = Path(__file__).resolve().parent / '.env'
+load_dotenv(dotenv_path=_env_path, override=True)
 SEARXNG_URL = os.getenv("SEARXNG_URL", "http://localhost:8080")
 
 # ── §1: Model Type Detection Helpers ─────────────────────────────────────────
@@ -181,6 +186,7 @@ def sanitize_input(text: str, max_length: int = 10000) -> str:
         text = text[:max_length]
     
     return text
+
 
 
 # ── Persistent async HTTP client (§11) ───────────────────────────────────────
@@ -381,7 +387,7 @@ async def translate_to_english(
                 break
         return translated_text.strip() if translated_text else text
     except Exception as e:
-        print(f"[WARN] translate_to_english failed: {e}, returning original text")
+        logging.warning(f"translate_to_english failed: {e}, returning original text")
         return text
 
 
@@ -420,7 +426,7 @@ async def translate_from_english(
                 break
         return translated_text.strip() if translated_text else text
     except Exception as e:
-        print(f"[WARN] translate_from_english failed: {e}, returning original text")
+        logging.warning(f"translate_from_english failed: {e}, returning original text")
         return text
 
 
@@ -456,14 +462,19 @@ async def run_guard_detection(
 
     api_base = os.getenv("OPENAI_API_BASE", "https://api.sea-lion.ai/v1")
     api_key = os.getenv("OPENAI_API_KEY")
-    guard_model = os.getenv("GUARD_MODEL", "aisingapore/SEA-LION-GUARD")
+    guard_model = os.getenv("GUARD_MODEL", "aisingapore/SEA-Guard")
+
+    if not api_key:
+        logging.error("[GUARD] OPENAI_API_KEY not set")
+        return {"is_ai_generated": None, "confidence": None,
+                "label": "api_key_missing", "raw_response": {}}
 
     # §2: Model-specific request configuration
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
     payload = {
         "model": guard_model,
-        "messages": [{"role": "user", "content": content}],
-        "temperature": 0,
+        "messages": [{"role": "user", "content": content[:2000]}],
+        "max_tokens": 256,
     }
     
     # §2: Only add tools param for non-Gemma, non-Reasoning models
@@ -471,6 +482,9 @@ async def run_guard_detection(
         # GUARD is a detection model, not a tool-calling model — no tools needed
         pass
 
+    # SEA-Guard returns safety labels (safe/unsafe), not AI-detection verdicts.
+    # Run SEA-Guard for safety check, then use Gemini for AI-content detection.
+    safety_label = None
     client = get_http_client()
     try:
         resp = await asyncio.wait_for(
@@ -479,66 +493,266 @@ async def run_guard_detection(
         )
         resp.raise_for_status()
         data = resp.json()
-        raw_text = data["choices"][0]["message"]["content"]
-        is_ai = "ai-generated" in raw_text.lower()
-        return {
-            "is_ai_generated": is_ai,
-            "confidence": None,
-            "label": raw_text.strip(),
-            "raw_response": data,
-        }
-    except asyncio.TimeoutError:
-        return {"error": "API timeout", "is_ai_generated": None, "confidence": None, "label": "timeout"}
+        raw_text = data["choices"][0]["message"]["content"].strip()
+        logging.info(f"[GUARD] SEA-Guard safety response: {raw_text[:200]}")
+        safety_label = raw_text.lower()
     except Exception as e:
-        return {"error": str(e), "is_ai_generated": None, "confidence": None, "label": "detection_failed"}
+        logging.warning(f"[GUARD] SEA-Guard safety check failed: {e}")
+
+    # Use Gemini as the primary AI-content detection engine
+    # Prefer GEMINI_API_KEY (project-specific) over GOOGLE_API_KEY (system-wide, may be rate-limited)
+    gemini_key = os.getenv('GEMINI_API_KEY', '') or os.getenv('GOOGLE_API_KEY', '')
+    if gemini_key:
+        try:
+            import google.genai as genai
+
+            gemini_model = os.getenv('MODEL_NAME', 'gemini-2.5-flash')
+            prompt = (
+                "Decide whether the following content is AI-generated or human-written. "
+                "Reply with exactly three lines:\n"
+                "VERDICT: AI or HUMAN\n"
+                "PROBABILITY: 0-100\n"
+                "LABEL: short label\n\n"
+                f"Content:\n{content[:2000]}"
+            )
+
+            def _call_gemini():
+                try:
+                    c = genai.Client(api_key=gemini_key)
+                    r = c.models.generate_content(model=gemini_model, contents=prompt)
+                    return r.text
+                except Exception:
+                    logging.exception('[GUARD] Gemini AI-detection failed')
+                    return None
+
+            gemini_resp = await asyncio.to_thread(_call_gemini)
+            if gemini_resp:
+                verdict = None
+                prob = None
+                label = gemini_resp.strip()
+                for line in gemini_resp.splitlines():
+                    lu = line.upper().strip()
+                    if lu.startswith('VERDICT:'):
+                        v = lu.split(':', 1)[1].strip()
+                        verdict = 'AI' in v
+                    elif lu.startswith('PROBABILITY:'):
+                        try:
+                            prob = float(re.sub(r'[^0-9.]', '', lu.split(':', 1)[1].strip()))
+                            if prob > 1.0:
+                                prob = prob / 100.0
+                        except Exception:
+                            prob = None
+                    elif lu.startswith('LABEL:'):
+                        label = line.split(':', 1)[1].strip()
+
+                result = {
+                    'is_ai_generated': bool(verdict) if verdict is not None else None,
+                    'confidence': prob,
+                    'label': label,
+                    'raw_response': gemini_resp,
+                }
+                # Attach safety info from SEA-Guard
+                if safety_label == 'unsafe':
+                    result['safety_flag'] = 'unsafe'
+                return result
+
+        except Exception:
+            logging.exception('[GUARD] Gemini AI-detection failed')
+
+    # If Gemini is not available, fall back to parsing SEA-Guard response
+    if safety_label is not None:
+        return {
+            "is_ai_generated": None,
+            "confidence": None,
+            "label": safety_label,
+            "safety_flag": safety_label,
+            "raw_response": {},
+        }
+
+    return {"is_ai_generated": None, "confidence": None,
+                "label": "api_error", "raw_response": {}}
+
+
+# ── AI Misinformation Detection ──────────────────────────────────────────────
+
+async def detect_misinformation(content: str, context_description: str = "") -> dict:
+    """
+    Detect AI-assisted misinformation in text content using Gemini.
+
+    Focuses on: false factual claims, fabricated quotes, manipulated statistics,
+    misleading context, and coordinated inauthentic narratives.
+
+    Args:
+        content: English text to analyse (OCR, transcript, or direct input).
+        context_description: Optional — e.g. "image caption", "forwarded message".
+
+    Returns:
+        dict: misinformation_detected (bool), misinformation_type (str),
+              claims (list[str]), explanation (str), confidence (float)
+    """
+    gemini_key = os.getenv("GOOGLE_API_KEY", "") or os.getenv("GEMINI_API_KEY", "")
+    if not gemini_key:
+        logging.warning("[Misinformation] GEMINI_API_KEY / GOOGLE_API_KEY not set")
+        return {
+            "misinformation_detected": False,
+            "misinformation_type": "unknown",
+            "claims": [],
+            "explanation": "Misinformation check unavailable (no API key).",
+            "confidence": 0.0,
+        }
+
+    try:
+        import google.genai as genai
+
+        os.environ.setdefault("GEMINI_API_KEY", gemini_key)
+        os.environ.setdefault("GENAI_API_KEY", gemini_key)
+
+        gemini_model_name = os.getenv("MODEL_NAME", "gemini-2.5-flash")
+        source_context = f"Source context: {context_description}\n" if context_description else ""
+
+        prompt = f"""You are a fact-checking assistant specialised in detecting AI-assisted misinformation.
+
+{source_context}Content to analyse:
+{content[:2000]}
+
+Analyse for misinformation. Respond in JSON format only — no markdown, no preamble:
+
+{{
+  "misinformation_detected": true or false,
+  "misinformation_type": "none | fabricated_quote | false_statistic | misleading_context | deepfake_narrative | coordinated_narrative | unknown",
+  "claims": ["list of specific suspicious claims, empty array if none"],
+  "explanation": "one paragraph plain-language explanation",
+  "confidence": 0.0 to 1.0
+}}
+
+Rules:
+- Only flag where there is clear evidence of manipulation or false claims
+- Do NOT flag opinions, clearly marked satire, or uncertain interpretations
+- If content is too short or generic to assess, set misinformation_detected to false
+- Base assessment only on the content provided, not assumptions"""
+
+        def _call():
+            try:
+                c = genai.Client(api_key=gemini_key)
+                resp = c.models.generate_content(
+                    model=gemini_model_name,
+                    contents=prompt,
+                )
+                return resp.text
+            except Exception:
+                logging.exception("[Misinformation] Gemini call failed")
+                return None
+
+        raw = await asyncio.to_thread(_call)
+        if raw:
+            clean = re.sub(r'^```(?:json)?\s*|\s*```$', '', raw.strip(), flags=re.MULTILINE).strip()
+            return json.loads(clean)
+    except (json.JSONDecodeError, Exception) as e:
+        logging.exception(f"[Misinformation] Detection failed: {e}")
+
+    return {
+        "misinformation_detected": False,
+        "misinformation_type": "unknown",
+        "claims": [],
+        "explanation": "Misinformation check unavailable.",
+        "confidence": 0.0,
+    }
 
 
 # ── SEA-LION Insights (§8: input validation + timeout) ────────────────────────
 
 async def run_insights(
-    content: str, detection_result: Dict[str, Any], timeout: float = 25.0
+    content: str, detection_result: Dict[str, Any],
+    misinformation_result: Dict[str, Any] = None,
+    manipulation_result: Dict[str, Any] = None,
+    timeout: float = 25.0
 ) -> Dict[str, Any]:
     """
-    Use SEA-LION v4 to generate a plain-language explanation of the detection result.
-    
+    Generate plain-language explanation combining all detection results.
+
     Args:
-        content: The original user-submitted content.
-        detection_result: Output from run_guard_detection.
+        content: The actual English-normalised content (NOT the GUARD label).
+        detection_result: Output from run_guard_detection().
+        misinformation_result: Output from detect_misinformation() — optional.
+        manipulation_result: Output from detect_image_manipulation() — optional.
         timeout: Request timeout in seconds (§9).
-    
+
     Returns:
-        Dict with: explanation, suggested_action.
+        Dict with: explanation (str), suggested_action (str), is_harmful (bool)
     """
     # §8/§9: Validate inputs
     if not content or not isinstance(content, str):
         raise ValueError("Content must be a non-empty string")
     if not isinstance(detection_result, dict):
         raise ValueError("detection_result must be a dictionary")
-    
+
     content = sanitize_input(content)
-    
+
+    # Build context sections from detection results
+    guard_label = detection_result.get("label", "unknown")
+
+    # Skip GUARD context if it errored — don't pollute insights with error strings
+    guard_context = ""
+    if guard_label not in ("api_error", "timeout", "api_key_missing"):
+        guard_verdict = (
+            "AI-generated" if detection_result.get("is_ai_generated") is True
+            else "Human-generated" if detection_result.get("is_ai_generated") is False
+            else "Inconclusive"
+        )
+        guard_context = f"SEA-LION GUARD verdict: {guard_verdict} ({guard_label[:150]})\n"
+
+    misinfo_context = ""
+    if misinformation_result and misinformation_result.get("misinformation_detected"):
+        claims = "\n".join(f"- {c}" for c in misinformation_result.get("claims", []))
+        misinfo_context = (
+            f"Misinformation detected — type: {misinformation_result.get('misinformation_type')}\n"
+            f"Suspicious claims:\n{claims or 'See misinformation explanation'}\n"
+        )
+
+    manip_context = ""
+    if manipulation_result and manipulation_result.get("manipulation_detected"):
+        signals = "\n".join(f"- {s}" for s in manipulation_result.get("signals", []))
+        manip_context = (
+            f"Image manipulation detected — type: {manipulation_result.get('manipulation_type')}\n"
+            f"Visual signals:\n{signals or 'See manipulation explanation'}\n"
+        )
+
+    insights_prompt = f"""
+You are an AI content analyst writing a plain-language report for a general user in Singapore.
+
+Content analysed:
+{content[:800]}
+
+Detection results:
+{guard_context}{misinfo_context}{manip_context}
+
+Write 2-3 sentences that:
+1. State clearly what was found (or not found)
+2. Explain the key reasons or signals for the verdict
+3. Give one practical recommendation for the user
+
+Rules:
+- Plain text only — no bullet points, headers, or markdown
+- Be factual and avoid alarmist language
+- If evidence is weak or results are inconclusive, say so honestly
+- If all checks returned no issues, clearly say the content appears genuine
+"""
+
+    HARMFUL_KEYWORDS = [
+        "misinformation", "disinformation", "harmful", "dangerous",
+        "incite", "violence", "hate", "scam", "fraud", "fake news",
+        "manipulated", "fabricated", "deepfake"
+    ]
+
+    # Try SEA-LION first
     api_base = os.getenv("OPENAI_API_BASE", "https://api.sea-lion.ai/v1")
     api_key = os.getenv("OPENAI_API_KEY")
     model = os.getenv("MODEL", "aisingapore/Llama-SEA-LION-v3-70B-IT")
 
-    prompt = f"""
-You are analysing the following content for AI-generation signals.
-
-Content: {content}
-Detection verdict: {detection_result.get('label', 'Unknown')}
-
-Provide:
-1. A clear explanation of why this content may or may not be AI-generated.
-2. Specific linguistic/visual/structural signals observed.
-3. A recommended action for the user (e.g. verify source, treat as AI-generated, inconclusive).
-
-Be concise. Do not over-censor. If evidence is weak, say so.
-"""
-
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
     payload = {
         "model": model,
-        "messages": [{"role": "user", "content": prompt}],
+        "messages": [{"role": "user", "content": insights_prompt}],
         "max_tokens": 512,
         "temperature": 0,
     }
@@ -551,11 +765,55 @@ Be concise. Do not over-censor. If evidence is weak, say so.
         )
         resp.raise_for_status()
         explanation = resp.json()["choices"][0]["message"]["content"]
-        return {"explanation": explanation, "suggested_action": "See explanation above."}
+        is_harmful = any(kw in explanation.lower() for kw in HARMFUL_KEYWORDS)
+        return {"explanation": explanation, "suggested_action": "See explanation above.",
+                "is_harmful": is_harmful}
     except asyncio.TimeoutError:
-        return {"error": "API timeout", "explanation": "Insights unavailable.", "suggested_action": "Manual review recommended."}
+        return {"explanation": "Insights unavailable.", "suggested_action": "Manual review recommended.",
+                "is_harmful": False}
     except Exception as e:
-        return {"error": str(e), "explanation": "Insights unavailable.", "suggested_action": "Manual review recommended."}
+        # Try Gemini fallback
+        err_str = str(e)
+        status_code = None
+        try:
+            if hasattr(e, 'response') and e.response is not None:
+                status_code = getattr(e.response, 'status_code', None)
+        except Exception:
+            status_code = None
+
+        if (status_code == 401) or ('401' in err_str) or ('Unauthorized' in err_str):
+            gemini_key = os.getenv('GOOGLE_API_KEY', '') or os.getenv('GEMINI_API_KEY', '')
+            if gemini_key:
+                try:
+                    import google.genai as genai
+
+                    gemini_model = os.getenv('MODEL_NAME', 'gemini-2.5-flash')
+                    os.environ.setdefault('GEMINI_API_KEY', gemini_key)
+                    os.environ.setdefault('GENAI_API_KEY', gemini_key)
+
+                    def _call_gemini():
+                        try:
+                            c = genai.Client(api_key=gemini_key)
+                            resp = c.models.generate_content(
+                                model=gemini_model,
+                                contents=insights_prompt,
+                            )
+                            return resp.text
+                        except Exception:
+                            logging.exception('[INSIGHTS] Gemini fallback failed')
+                            return None
+
+                    gemini_resp = await asyncio.to_thread(_call_gemini)
+                    if gemini_resp:
+                        is_harmful = any(kw in gemini_resp.lower() for kw in HARMFUL_KEYWORDS)
+                        return {"explanation": gemini_resp,
+                                "suggested_action": "See explanation above (Gemini fallback).",
+                                "is_harmful": is_harmful}
+                except Exception:
+                    pass
+
+        return {"explanation": "Insights unavailable.", "suggested_action": "Manual review recommended.",
+                "is_harmful": False}
 
 
 # ── Image Analysis (Gemini) ───────────────────────────────────────────────────
@@ -585,13 +843,13 @@ async def analyse_image_with_gemini(image_path: str) -> Dict[str, Any]:
     import google.genai as genai
     from PIL import Image
 
-    gemini_key = os.getenv("GEMINI_API_KEY", "")
+    gemini_key = os.getenv("GOOGLE_API_KEY", "") or os.getenv("GEMINI_API_KEY", "")
     if not gemini_key:
-        return {"error": "GEMINI_API_KEY not set", "caption": "", "ocr_text": None, "ai_signals": ""}
+        return {"error": "GEMINI_API_KEY / GOOGLE_API_KEY not set", "caption": "", "ocr_text": None, "ai_signals": ""}
 
     try:
-        genai.configure(api_key=gemini_key)
-        model = genai.GenerativeModel(os.getenv("MODEL_NAME", "gemini-2.5-flash"))
+        client = genai.Client(api_key=gemini_key)
+        gemini_model = os.getenv("MODEL_NAME", "gemini-2.5-flash")
 
         img = Image.open(image_path)
 
@@ -614,7 +872,10 @@ DESCRIPTION: <your description>
 OCR_TEXT: <extracted text or "No text detected">
 AI_SIGNALS: <your analysis>"""
 
-        response = model.generate_content([prompt, img])
+        response = client.models.generate_content(
+            model=gemini_model,
+            contents=[prompt, img],
+        )
         text = response.text if hasattr(response, 'text') else str(response)
 
         # Parse structured response
@@ -724,7 +985,8 @@ async def synthesise_speech_elevenlabs(text: str, output_path: str) -> Dict[str,
         if not api_key:
             return {"success": False, "output_path": "", "error": "ELEVENLABS_API_KEY not set"}
 
-        # Truncate to API limit
+        # Strip HTML tags and truncate to API limit
+        text = re.sub(r'<[^>]+>', '', text)
         text = text[:5000]
 
         client = ElevenLabs(api_key=api_key)
@@ -733,6 +995,7 @@ async def synthesise_speech_elevenlabs(text: str, output_path: str) -> Dict[str,
             text=text,
             voice_id=voice_id,
             model_id="eleven_multilingual_v2",
+            output_format="mp3_44100_128",
         )
 
         with open(output_path, "wb") as f:
@@ -821,39 +1084,113 @@ async def analyse_video(video_path: str) -> Dict[str, Any]:
 
 # ── ClickHouse Logger ─────────────────────────────────────────────────────────
 
-def log_to_clickhouse(
-    user_id: str,
-    content_type: str,
-    content_preview: str,
-    detection_label: str,
-    confidence: Optional[float],
-    explanation: str,
-) -> Dict[str, Any]:
-    """
-    Log a detection event to ClickHouse for real-time analytics.
-    """
-    # §9: Validate inputs
-    if not user_id or not isinstance(user_id, str):
-        return {"status": "failed", "error": "Invalid user_id"}
-    if not content_type or content_type not in ('text', 'image', 'audio', 'video'):
-        return {"status": "failed", "error": "Invalid content_type"}
-    
+import hashlib as _hashlib
+import sys as _sys
+import uuid as _uuid
+
+# Lazy-initialised ClickHouse client (one per process)
+_ch_client = None
+
+def _get_ch_client():
+    """Return a cached clickhouse-connect client. Never raises."""
+    global _ch_client
+    if _ch_client is not None:
+        return _ch_client
     try:
-        from clickhouse_driver import Client
-        client = Client(
-            host=os.getenv("CLICKHOUSE_HOST"),
-            port=int(os.getenv("CLICKHOUSE_PORT", 9000)),
-            user=os.getenv("CLICKHOUSE_USER", "default"),
+        import clickhouse_connect
+        _ch_client = clickhouse_connect.get_client(
+            host=os.getenv("CLICKHOUSE_HOST", "e8vpdqdapz.asia-southeast1.gcp.clickhouse.cloud"),
+            port=int(os.getenv("CLICKHOUSE_PORT", 8443)),
+            username=os.getenv("CLICKHOUSE_USER", "default"),
             password=os.getenv("CLICKHOUSE_PASSWORD", ""),
             database=os.getenv("CLICKHOUSE_DB", "agent_logs"),
+            secure=True,
         )
-        client.execute(
-            "INSERT INTO detection_events (user_id, content_type, content_preview, detection_label, confidence, explanation) VALUES",
-            [(user_id, content_type, (content_preview or "")[:200], detection_label or "", confidence, explanation or "")],
+        return _ch_client
+    except Exception:
+        logging.exception("[ClickHouse] Failed to create client")
+        return None
+
+
+def log_to_clickhouse(row_dict: dict) -> Dict[str, Any]:
+    """
+    Log a detection event to ClickHouse for real-time analytics.
+
+    Accepts a dict matching the detection_events schema. Uses async_insert so
+    the caller is never blocked. Safe to call via ``asyncio.to_thread()``.
+
+    Never raises — all exceptions are logged to stderr and swallowed.
+
+    Args:
+        row_dict: Dictionary with keys matching the detection_events columns.
+            Required: user_id, content_type.
+            Optional: session_id, source_language, content_preview, guard_label,
+                      guard_verdict, guard_confidence, misinfo_detected, misinfo_type,
+                      manipulation_detected, manipulation_type, explanation,
+                      is_harmful, processing_ms, model_versions, error_code.
+
+    Returns:
+        {"status": "logged"} on success, {"status": "failed", "error": "..."} otherwise.
+    """
+    try:
+        client = _get_ch_client()
+        if client is None:
+            return {"status": "failed", "error": "ClickHouse client unavailable"}
+
+        # Map guard_verdict string to valid Enum value
+        valid_verdicts = {'ai_generated', 'human_generated', 'inconclusive', 'error'}
+        raw_verdict = str(row_dict.get("guard_verdict", "error")).lower().replace("-", "_").replace(" ", "_")
+        guard_verdict = raw_verdict if raw_verdict in valid_verdicts else "error"
+
+        # Map content_type to valid Enum value
+        valid_types = {'text', 'image', 'audio', 'video'}
+        ct = str(row_dict.get("content_type", "text")).lower()
+        content_type = ct if ct in valid_types else "text"
+
+        # Hash user_id for privacy
+        raw_uid = str(row_dict.get("user_id", "unknown"))
+        hashed_uid = _hashlib.sha256(raw_uid.encode()).hexdigest()[:16]
+
+        row = [[
+            _uuid.uuid4(),                                                 # event_id
+            hashed_uid,                                                    # user_id
+            str(row_dict.get("session_id", "")),                           # session_id
+            content_type,                                                  # content_type
+            str(row_dict.get("source_language", "en")),                    # source_language
+            str(row_dict.get("content_preview", ""))[:500],                # content_preview
+            str(row_dict.get("guard_label", "")),                          # guard_label
+            guard_verdict,                                                 # guard_verdict
+            row_dict.get("guard_confidence"),                              # guard_confidence (Nullable)
+            bool(row_dict.get("misinfo_detected", False)),                 # misinfo_detected
+            str(row_dict.get("misinfo_type", "none")),                     # misinfo_type
+            bool(row_dict.get("manipulation_detected", False)),            # manipulation_detected
+            str(row_dict.get("manipulation_type", "none")),                # manipulation_type
+            str(row_dict.get("explanation", "")),                          # explanation
+            bool(row_dict.get("is_harmful", False)),                       # is_harmful
+            int(row_dict.get("processing_ms", 0)),                         # processing_ms
+            row_dict.get("model_versions") or {},                          # model_versions
+            str(row_dict.get("error_code", "none")),                       # error_code
+        ]]
+
+        columns = [
+            "event_id", "user_id", "session_id", "content_type",
+            "source_language", "content_preview", "guard_label", "guard_verdict",
+            "guard_confidence", "misinfo_detected", "misinfo_type",
+            "manipulation_detected", "manipulation_type", "explanation",
+            "is_harmful", "processing_ms", "model_versions", "error_code",
+        ]
+
+        client.insert(
+            "detection_events",
+            row,
+            column_names=columns,
+            settings={"async_insert": 1, "wait_for_async_insert": 0},
         )
         return {"status": "logged"}
-    except Exception as e:
-        return {"status": "failed", "error": str(e)}
+    except Exception as exc:
+        print(f"[ClickHouse] log_to_clickhouse failed: {exc}", file=_sys.stderr)
+        logging.exception("[ClickHouse] log_to_clickhouse failed")
+        return {"status": "failed", "error": str(exc)}
 
 
 # ── Message Format (§14) ─────────────────────────────────────────────────────
@@ -888,71 +1225,214 @@ def format_detection_response(
     Returns:
         Formatted Markdown string for Telegram.
     """
-    # Verdict emoji
-    if is_ai_generated is True:
-        verdict_emoji = "🔴"
-        verdict_label = "Likely AI-Generated"
-    elif is_ai_generated is False:
-        verdict_emoji = "🟢"
-        verdict_label = "Likely Human-Generated"
-    else:
-        verdict_emoji = "🟡"
-        verdict_label = "Inconclusive"
+    # Normalise/interpret confidence (support 0..1 or 0..100 inputs)
+    conf_float: float | None = None
+    if confidence is not None:
+        try:
+            c = float(confidence)
+            if c > 1.0:
+                c = max(0.0, min(100.0, c)) / 100.0
+            conf_float = max(0.0, min(1.0, c))
+        except Exception:
+            conf_float = None
+
+    # Derive a clearer verdict using both boolean flag and raw verdict string
+    verdict_normalised = (verdict or "").strip()
+    v_low = verdict_normalised.lower()
+
+    def label_for(ai_prob: float | None, ai_flag: bool | None, raw: str) -> tuple[str, str]:
+        if ai_flag is True:
+            if ai_prob is not None:
+                if ai_prob >= 0.9:
+                    return ("🔴", "Very Likely AI-Generated")
+                if ai_prob >= 0.65:
+                    return ("🔴", "Likely AI-Generated")
+                if ai_prob >= 0.45:
+                    return ("🟠", "Possibly AI-Generated")
+                return ("🟡", "Weak AI signals (Inconclusive)")
+            return ("🔴", "Likely AI-Generated")
+
+        if ai_flag is False:
+            if ai_prob is not None:
+                if ai_prob >= 0.9:
+                    return ("🟢", "Very Likely Human-Generated")
+                if ai_prob >= 0.65:
+                    return ("🟢", "Likely Human-Generated")
+                if ai_prob >= 0.45:
+                    return ("🟡", "Possibly Human-Generated")
+                return ("🟡", "Weak human signal (Inconclusive)")
+            return ("🟢", "Likely Human-Generated")
+
+        if any(k in raw for k in ("ai", "generated", "bot", "synthetic")):
+            if ai_prob is not None and ai_prob >= 0.65:
+                return ("🔴", "Likely AI-Generated")
+            return ("🟠", "Possible AI-Generated")
+        if any(k in raw for k in ("human", "authentic", "real")):
+            return ("🟢", "Likely Human-Generated")
+
+        return ("🟡", "Inconclusive")
+
+    verdict_emoji, verdict_label = label_for(conf_float, is_ai_generated, v_low)
 
     # Content type header
     type_icons = {"text": "📝", "image": "🖼️", "audio": "🎤", "video": "🎬"}
     type_icon = type_icons.get(content_type, "📄")
 
+    # Escape dynamic content for HTML (allow only our tags)
+    caption_safe = html.escape(caption or "")
+    ocr_safe = html.escape(ocr_text) if ocr_text else None
+    transcript_safe = html.escape(transcript or "")
+    ai_signals_safe = html.escape(ai_signals or "")
+    explanation_safe = html.escape(explanation or "")
+    verdict_label_safe = html.escape(verdict_label)
+    verdict_normalised_safe = html.escape(verdict_normalised)
+
     # Confidence bar
-    if confidence is not None:
-        pct = int(confidence * 100)
-        filled = int(confidence * 10)
+    if conf_float is not None:
+        pct = int(conf_float * 100)
+        filled = int(round(conf_float * 10))
+        filled = max(0, min(10, filled))
         bar = "█" * filled + "░" * (10 - filled)
-        confidence_line = f"*Confidence*: {bar} {pct}%"
+        confidence_line = f"<b>Confidence</b>: <code>{html.escape(bar)} {pct}%</code>"
     else:
-        confidence_line = "*Confidence*: Not available"
+        confidence_line = "<b>Confidence</b>: Not available"
 
-    # Build message
+    # Build HTML message
     lines = []
-    lines.append(f"{type_icon} *{content_type.upper()} ANALYSIS*")
-    lines.append("")
-    lines.append(f"{verdict_emoji} *Verdict*: {verdict_label}")
-    lines.append(confidence_line)
-    lines.append("")
+    lines.append(f"{type_icon} <b>{html.escape(content_type.upper())} ANALYSIS</b>")
 
-    # Content preview section (varies by type)
+    # Include raw verdict label in parentheses when provided for transparency
+    raw_hint = ""
+    if verdict_normalised and verdict_normalised.lower() not in verdict_label.lower():
+        raw_hint = f" (<code>{verdict_normalised_safe}</code>)"
+
+    lines.append(f"{verdict_emoji} <b>Verdict</b>: {verdict_label_safe}{raw_hint}")
+    lines.append(confidence_line)
+
+    # Content preview section
     if content_type == "image":
-        if caption:
-            lines.append(f"🔎 *Image Content*: {caption[:150]}")
-        if ocr_text:
-            lines.append(f"📖 *Detected Text*: _{ocr_text[:150]}_")
-        if ai_signals:
-            lines.append(f"⚠️ *Visual Signals*: {ai_signals[:200]}")
-        lines.append("")
+        if caption_safe:
+            lines.append(f"🔎 <b>Image Content</b>: {caption_safe[:150]}")
+        if ocr_safe:
+            lines.append(f"📖 <b>Detected Text</b>: <i>{ocr_safe[:150]}</i>")
+        if ai_signals_safe:
+            lines.append(f"⚠️ <b>Visual Signals</b>: {ai_signals_safe[:200]}")
     elif content_type == "audio":
-        if transcript:
-            lines.append(f"📝 *Transcript*: _{transcript[:200]}_")
-        lines.append("")
+        if transcript_safe:
+            lines.append(f"📝 <b>Transcript</b>: <i>{transcript_safe[:200]}</i>")
     elif content_type == "video":
         if frames_checked:
-            lines.append(f"🎞️ *Frames Analysed*: {frames_checked}")
-        if transcript:
-            lines.append(f"📝 *Audio Transcript*: _{transcript[:150]}_")
-        if ai_signals:
-            lines.append(f"⚠️ *Visual Signals*: {ai_signals[:200]}")
-        lines.append("")
+            lines.append(f"🎞️ <b>Frames Analysed</b>: {frames_checked}")
+        if transcript_safe:
+            lines.append(f"📝 <b>Audio Transcript</b>: <i>{transcript_safe[:150]}</i>")
+        if ai_signals_safe:
+            lines.append(f"⚠️ <b>Visual Signals</b>: {ai_signals_safe[:200]}")
 
     # Explanation
-    lines.append("💡 *Analysis*")
-    clean_explanation = explanation.strip()
+    lines.append("")
+    lines.append("<b>Analysis</b>")
+    clean_explanation = explanation_safe.strip() if explanation_safe else ""
     if len(clean_explanation) > 500:
         clean_explanation = clean_explanation[:497] + "..."
     lines.append(clean_explanation)
-    lines.append("")
 
     # Footer
-    lines.append("─" * 20)
-    lines.append("🤖 _Powered by SEA-LION GUARD + Gemini_")
-    lines.append("_This is an automated analysis. Use your own judgement._")
+    lines.append("──────────────────────")
+    lines.append("🤖 <i>Powered by SEA-LION GUARD + Gemini</i>")
+    lines.append("<i>This is an automated analysis. Use your own judgement.</i>")
+
+    return "\n".join([l for l in lines if l is not None])
+
+
+# ── Fact-Check via Research Agent ─────────────────────────────────────────────
+
+async def fact_check_claims(
+    claims: List[str],
+    misinfo_result: Dict[str, Any],
+    max_claims: int = 3,
+    timeout: float = 30.0,
+) -> Dict[str, Any]:
+    """
+    Fact-check suspicious claims by researching them with the research_agent.
+
+    Args:
+        claims: List of suspicious claim strings from detect_misinformation.
+        misinfo_result: Full misinformation detection result dict.
+        max_claims: Maximum number of claims to research (bounds latency).
+        timeout: Total timeout in seconds for all research tasks.
+
+    Returns:
+        Dict with: researched (bool), findings (list of dicts), error (str|None).
+    """
+    if not claims:
+        return {"researched": False, "findings": [], "error": None}
+
+    try:
+        from research_agent import research as do_research
+    except ImportError:
+        logging.warning("[FactCheck] research_agent not available")
+        return {"researched": False, "findings": [], "error": "research_agent not installed"}
+
+    selected = claims[:max_claims]
+    findings = []
+
+    async def _research_one(claim: str) -> Dict[str, Any]:
+        query = f"fact check: {claim}"
+        try:
+            result = await do_research(query)
+            summary = ""
+            if result.summary_path:
+                try:
+                    summary = Path(result.summary_path).read_text(encoding="utf-8")[:600]
+                except Exception:
+                    pass
+            return {
+                "claim": claim,
+                "summary": summary or "No summary available.",
+                "sources": result.sources[:5],
+            }
+        except Exception as exc:
+            logging.exception(f"[FactCheck] Research failed for claim: {claim[:80]}")
+            return {"claim": claim, "summary": f"Research unavailable: {exc}", "sources": []}
+
+    try:
+        tasks = [_research_one(c) for c in selected]
+        results = await asyncio.wait_for(asyncio.gather(*tasks, return_exceptions=True), timeout=timeout)
+        for r in results:
+            if isinstance(r, BaseException):
+                logging.warning(f"[FactCheck] Task exception: {r}")
+            else:
+                findings.append(r)
+    except asyncio.TimeoutError:
+        logging.warning("[FactCheck] Research timed out after %.0fs", timeout)
+
+    return {"researched": bool(findings), "findings": findings, "error": None}
+
+
+def format_fact_check_section(fact_check_result: Dict[str, Any]) -> str:
+    """
+    Format fact-check findings as an HTML string for Telegram.
+
+    Args:
+        fact_check_result: Return value from fact_check_claims().
+
+    Returns:
+        HTML string, or empty string if nothing to show.
+    """
+    findings = fact_check_result.get("findings", [])
+    if not findings:
+        return ""
+
+    lines = ["", "🔎 <b>Fact-Check</b>"]
+    for i, f in enumerate(findings, 1):
+        claim_safe = html.escape(f.get("claim", "")[:120])
+        summary_safe = html.escape(f.get("summary", "")[:300])
+        lines.append(f"<b>{i}. Claim</b>: <i>{claim_safe}</i>")
+        lines.append(f"   {summary_safe}")
+        sources = f.get("sources", [])
+        if sources:
+            src_links = ", ".join(html.escape(s) for s in sources[:3])
+            lines.append(f"   📰 Sources: {src_links}")
+        lines.append("")
 
     return "\n".join(lines)
