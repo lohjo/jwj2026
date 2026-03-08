@@ -19,7 +19,7 @@ from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
 
-CRAWL_DIR = Path(__file__).resolve().parent / "crawl_results"
+CRAWL_DIR = Path(__file__).resolve().parent / "research" / "summaries"
 MAX_PAGES = 10
 
 

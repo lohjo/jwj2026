@@ -200,6 +200,9 @@ async def _auto_research_if_flagged(
     misinfo_result: dict | None,
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
+    source_lang: str = "en",
+    user_id: str = "",
+    session_id: str = "",
 ) -> None:
     """
     If detection flags content as AI-generated or unsafe, automatically run
@@ -237,12 +240,22 @@ async def _auto_research_if_flagged(
                 reason.append("misinformation")
             reason_str = ", ".join(reason)
 
-            await update.message.reply_text(
+            response = (
                 f"🔎 <b>Auto-Research</b> (flagged as {reason_str})\n\n"
                 f"{preview}\n\n"
-                f"({len(result.sources)} sources analysed)",
-                parse_mode="HTML",
+                f"({len(result.sources)} sources analysed)"
             )
+
+            # Translate to user's language
+            if source_lang != "en" and translate_from_english is not None and user_id and session_id:
+                try:
+                    runner = get_runner()
+                    if runner:
+                        response = await translate_from_english(response, source_lang, runner, user_id, session_id)
+                except Exception:
+                    logging.exception("translate_from_english failed in auto-research")
+
+            await update.message.reply_text(response, parse_mode="HTML")
             # Also send the full report as a file
             with open(result.summary_path, "rb") as f:
                 await context.bot.send_document(
@@ -412,7 +425,8 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             # Auto-research if flagged
             asyncio.create_task(
                 _auto_research_if_flagged(
-                    english_text, detection_result, misinfo_result, update, context
+                    english_text, detection_result, misinfo_result, update, context,
+                    source_lang=source_lang, user_id=user_id, session_id=session_id,
                 )
             )
         except Exception as e:
@@ -523,7 +537,8 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         # Auto-research if flagged
         asyncio.create_task(
             _auto_research_if_flagged(
-                guard_input, detection_result, misinfo_result, update, context
+                guard_input, detection_result, misinfo_result, update, context,
+                source_lang=source_lang, user_id=user_id, session_id=session_id,
             )
         )
 
@@ -637,7 +652,8 @@ async def handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         # Auto-research if flagged
         asyncio.create_task(
             _auto_research_if_flagged(
-                english_text, detection_result, None, update, context
+                english_text, detection_result, None, update, context,
+                source_lang=source_lang, user_id=user_id, session_id=session_id,
             )
         )
 
@@ -766,7 +782,8 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         # Auto-research if flagged
         asyncio.create_task(
             _auto_research_if_flagged(
-                guard_input, detection_result, None, update, context
+                guard_input, detection_result, None, update, context,
+                source_lang=source_lang, user_id=user_id, session_id=session_id,
             )
         )
 
@@ -816,13 +833,25 @@ async def crawl_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
     await update.message.reply_text("🕷️ Crawling and analysing, please wait...")
 
+    # Detect user's language from query text (excluding URLs)
+    source_lang = "en"
+    tokens = raw_input.split()
+    query_tokens = [t for t in tokens if not t.startswith("http://") and not t.startswith("https://")]
+    query_text = " ".join(query_tokens)
+    if detect_language is not None and len(query_text) >= 20:
+        try:
+            source_lang = detect_language(query_text)
+        except Exception:
+            source_lang = "en"
+
+    session_id = await get_or_create_session(user_id)
+
     try:
         from web_crawler import crawl_and_flag
 
         # If the input looks like URLs, split them; otherwise treat as search query
-        tokens = raw_input.split()
         explicit_urls = [t for t in tokens if t.startswith("http://") or t.startswith("https://")]
-        query = " ".join(t for t in tokens if t not in explicit_urls) or raw_input
+        query = query_text or raw_input
 
         report_path = await crawl_and_flag(
             query=query,
@@ -832,10 +861,18 @@ async def crawl_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         # Read and preview the report
         report_text = report_path.read_text(encoding="utf-8")
         preview = report_text[:800]
-        await update.message.reply_text(
-            f"📄 <b>Crawl Report</b>\n\n<pre>{preview}</pre>",
-            parse_mode="HTML",
-        )
+        response = f"📄 <b>Crawl Report</b>\n\n<pre>{preview}</pre>"
+
+        # Translate to user's language
+        if source_lang != "en" and translate_from_english is not None:
+            runner = get_runner()
+            if runner:
+                try:
+                    response = await translate_from_english(response, source_lang, runner, user_id, session_id)
+                except Exception:
+                    logging.exception("translate_from_english failed in crawl_command")
+
+        await update.message.reply_text(response, parse_mode="HTML")
 
         # Send full report as file attachment
         with open(report_path, "rb") as f:
@@ -847,13 +884,13 @@ async def crawl_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
         # Log to ClickHouse
         if log_to_clickhouse:
-            session_id = await get_or_create_session(user_id)
             asyncio.create_task(asyncio.to_thread(
                 log_to_clickhouse,
                 {
                     "user_id": user_id,
                     "session_id": session_id,
                     "content_type": "text",
+                    "source_language": source_lang,
                     "content_preview": f"crawl: {query[:480]}",
                     "guard_verdict": "human_generated",
                     "explanation": f"Web crawl query: {query}",
@@ -883,6 +920,16 @@ async def research_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
     await update.message.reply_text("🔍 Researching, please wait...")
 
+    # Detect user's language from query
+    source_lang = "en"
+    if detect_language is not None and len(query) >= 20:
+        try:
+            source_lang = detect_language(query)
+        except Exception:
+            source_lang = "en"
+
+    session_id = await get_or_create_session(user_id)
+
     try:
         from research_agent import research as do_research
 
@@ -892,19 +939,31 @@ async def research_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             from pathlib import Path
             skill_text = Path(result.skill_path).read_text(encoding="utf-8")
             preview = skill_text[:800]
-            await update.message.reply_text(
-                f"📚 <b>Cached Skill Card</b>\n\n<pre>{preview}</pre>",
-                parse_mode="HTML",
-            )
+            response = f"📚 <b>Cached Skill Card</b>\n\n<pre>{preview}</pre>"
+            if source_lang != "en" and translate_from_english is not None:
+                runner = get_runner()
+                if runner:
+                    try:
+                        response = await translate_from_english(response, source_lang, runner, user_id, session_id)
+                    except Exception:
+                        logging.exception("translate_from_english failed in research_command")
+            await update.message.reply_text(response, parse_mode="HTML")
         elif result.summary_path:
             from pathlib import Path
             summary_text = Path(result.summary_path).read_text(encoding="utf-8")
             preview = summary_text[:800]
-            await update.message.reply_text(
+            response = (
                 f"📝 <b>Research Summary</b>\n\n{preview}\n\n"
-                f"({len(result.sources)} sources analysed)",
-                parse_mode="HTML",
+                f"({len(result.sources)} sources analysed)"
             )
+            if source_lang != "en" and translate_from_english is not None:
+                runner = get_runner()
+                if runner:
+                    try:
+                        response = await translate_from_english(response, source_lang, runner, user_id, session_id)
+                    except Exception:
+                        logging.exception("translate_from_english failed in research_command")
+            await update.message.reply_text(response, parse_mode="HTML")
             # Send full summary as file attachment
             with open(result.summary_path, "rb") as f:
                 await context.bot.send_document(
@@ -917,13 +976,13 @@ async def research_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
         # Log research event to ClickHouse
         if log_to_clickhouse:
-            session_id = await get_or_create_session(user_id)
             asyncio.create_task(asyncio.to_thread(
                 log_to_clickhouse,
                 {
                     "user_id": user_id,
                     "session_id": session_id,
                     "content_type": "text",
+                    "source_language": source_lang,
                     "content_preview": query[:500],
                     "guard_verdict": "human_generated",
                     "explanation": f"Research query: {query}",
