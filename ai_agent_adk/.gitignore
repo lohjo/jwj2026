@@ -12,8 +12,9 @@ dist/
 build/
 *.egg
 
-# Downloads (media files from Telegram)
+# (media files from Telegram)
 downloads/
+uploads/
 
 # Virtual environments
 venv/

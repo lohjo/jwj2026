@@ -324,109 +324,150 @@ def searxng_search(
 
 # ── Language Detection ────────────────────────────────────────────────────────
 
+# Supported languages: English, Mandarin Chinese (Simplified), Malay, Tamil
+SUPPORTED_LANGS = {"en", "zh", "ms", "ta"}
+
+# Map langdetect codes to supported language codes
+_LANG_MAP = {
+    "en": "en",
+    "zh-cn": "zh", "zh-tw": "zh", "zh": "zh",
+    "ms": "ms", "id": "ms",   # Indonesian is close to Malay
+    "ta": "ta",
+}
+
+# Human-readable names for prompt construction
+LANG_NAMES = {
+    "en": "English",
+    "zh": "Mandarin Chinese (Simplified)",
+    "ms": "Malay",
+    "ta": "Tamil",
+}
+
+
 def detect_language(text: str) -> str:
     """
-    Detect the language of the given text using langdetect.
-    
+    Detect the language of the given text using langdetect,
+    constrained to the four supported languages: en, zh, ms, ta.
+
     Args:
         text: The text to detect the language of.
-    
+
     Returns:
-        ISO 639-1 language code (e.g., "en", "zh-cn", "ms", "ta").
-        On failure, returns "en" as a safe default.
+        One of "en", "zh", "ms", "ta".
+        Unsupported or unrecognised languages default to "en".
     """
-    # §9: Validate input
     if not text or not isinstance(text, str):
         return "en"
-    
+
     try:
-        detected_lang = detect(text)
-        return detected_lang
+        raw = detect(text)
+        mapped = _LANG_MAP.get(raw)
+        if mapped:
+            return mapped
+        # Check prefix match (e.g. "zh-hk" → "zh")
+        prefix = raw.split("-")[0]
+        if prefix in SUPPORTED_LANGS:
+            return prefix
+        logging.info(f"Detected unsupported language '{raw}'; defaulting to English")
+        return "en"
     except LangDetectException:
-        print(f"[WARN] Language detection failed for text, defaulting to English")
+        logging.warning("Language detection failed; defaulting to English")
         return "en"
     except Exception:
         return "en"
 
 
-# ── Translation Bridge ────────────────────────────────────────────────────────
+# ── Translation Bridge (SEA-LION Gemma via OpenAI-compatible API) ─────────────
 
 async def translate_to_english(
-    text: str, source_lang: str, runner, user_id: str, session_id: str
+    text: str, source_lang: str, runner=None, user_id: str = "", session_id: str = ""
 ) -> str:
     """
-    Translate text from source language to English using the translator subagent.
-    
+    Translate text from a supported language to English using the SEA-LION Gemma model.
+
     Args:
         text: The text to translate.
-        source_lang: ISO 639-1 language code of the source language.
-        runner: Google ADK Runner instance.
-        user_id: User ID for the session.
-        session_id: Session ID for the runner.
-    
+        source_lang: One of "zh", "ms", "ta" (or "en" → no-op).
+        runner, user_id, session_id: Kept for backward-compatible call signature.
+
     Returns:
-        Translated English text, or original text on failure (fail-safe §9).
+        Translated English text, or original text on failure.
     """
     if source_lang == "en":
         return text
-    
-    # §9: Validate inputs
     if not text or not isinstance(text, str):
         return text
-    
-    try:
-        message = Content(
-            role='user',
-            parts=[Part(text=f"Translate the following {source_lang} text to English:\n{text}")]
-        )
-        translated_text = ""
-        async for event in runner.run_async(user_id, session_id, message):
-            if hasattr(event, 'text') and event.text:
-                translated_text += event.text
-            if hasattr(event, 'is_final_response') and event.is_final_response():
-                break
-        return translated_text.strip() if translated_text else text
-    except Exception as e:
-        logging.warning(f"translate_to_english failed: {e}, returning original text")
-        return text
+
+    lang_name = LANG_NAMES.get(source_lang, source_lang)
+    return await _call_sealion_translate(
+        text,
+        f"Translate the following {lang_name} text to English. "
+        "Preserve all original phrasing, formatting, and punctuation exactly. "
+        "Do not clean up grammar or fix errors. Output ONLY the translated text.",
+    )
 
 
 async def translate_from_english(
-    text: str, target_lang: str, runner, user_id: str, session_id: str
+    text: str, target_lang: str, runner=None, user_id: str = "", session_id: str = ""
 ) -> str:
     """
-    Translate text from English to target language using the translator subagent.
-    
+    Translate text from English to a supported language using the SEA-LION Gemma model.
+
     Args:
         text: The English text to translate.
-        target_lang: ISO 639-1 language code of the target language.
-        runner: Google ADK Runner instance.
-        user_id: User ID for the session.
-        session_id: Session ID for the runner.
-    
+        target_lang: One of "zh", "ms", "ta" (or "en" → no-op).
+        runner, user_id, session_id: Kept for backward-compatible call signature.
+
     Returns:
-        Translated text, or original text on failure (fail-safe §9).
+        Translated text, or original text on failure.
     """
     if target_lang == "en":
         return text
-    
     if not text or not isinstance(text, str):
         return text
-    
+
+    lang_name = LANG_NAMES.get(target_lang, target_lang)
+    return await _call_sealion_translate(
+        text,
+        f"Translate the following English text to {lang_name}. "
+        "Translate naturally and clearly. "
+        "Always preserve these English terms untranslated: "
+        '"AI-generated", "deepfake", "confidence score", "GUARD", "OCR". '
+        "Output ONLY the translated text.",
+    )
+
+
+async def _call_sealion_translate(text: str, system_prompt: str) -> str:
+    """Call SEA-LION Gemma model for translation via OpenAI-compatible API."""
+    api_base = os.getenv("OPENAI_API_BASE", "https://api.sea-lion.ai/v1")
+    api_key = os.getenv("OPENAI_API_KEY")
+    gemma_model = os.getenv("TRANSLATOR_MODEL", "aisingapore/Gemma-SEA-LION-v3-9B-IT")
+
+    if not api_key:
+        logging.error("[Translate] OPENAI_API_KEY not set")
+        return text
+
+    url = f"{api_base.rstrip('/')}/chat/completions"
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    payload = {
+        "model": gemma_model,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": text},
+        ],
+        "temperature": 0.3,
+        "max_tokens": 2048,
+    }
+
     try:
-        message = Content(
-            role='user',
-            parts=[Part(text=f"Translate the following English text to {target_lang}:\n{text}")]
-        )
-        translated_text = ""
-        async for event in runner.run_async(user_id, session_id, message):
-            if hasattr(event, 'text') and event.text:
-                translated_text += event.text
-            if hasattr(event, 'is_final_response') and event.is_final_response():
-                break
-        return translated_text.strip() if translated_text else text
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(url, json=payload, headers=headers)
+            resp.raise_for_status()
+            data = resp.json()
+            result = data["choices"][0]["message"]["content"].strip()
+            return result if result else text
     except Exception as e:
-        logging.warning(f"translate_from_english failed: {e}, returning original text")
+        logging.warning(f"SEA-LION Gemma translation failed: {e}; returning original text")
         return text
 
 
@@ -920,33 +961,29 @@ async def transcribe_audio_deepgram(audio_path: str) -> Dict[str, Any]:
         - error (str | None): Error message if transcription failed
     """
     try:
-        from deepgram import DeepgramClient, PrerecordedOptions, FileSource
+        from deepgram import DeepgramClient
 
         api_key = os.getenv("DEEPGRAM_API_KEY", "")
         if not api_key:
             return {"error": "DEEPGRAM_API_KEY not set", "transcript": "", "confidence": 0.0}
 
-        client = DeepgramClient(api_key)
+        client = DeepgramClient(api_key=api_key)
 
         with open(audio_path, "rb") as f:
             buffer_data = f.read()
 
-        payload: FileSource = {"buffer": buffer_data}
-        options = PrerecordedOptions(
+        response = await asyncio.to_thread(
+            client.listen.v1.media.transcribe_file,
+            request=buffer_data,
             model="nova-2",
             smart_format=True,
-            language="en",        # Auto-detects but defaults to English
             detect_language=True,
             punctuate=True,
         )
 
-        response = await asyncio.to_thread(
-            client.listen.rest.v1.transcribe_file, payload, options
-        )
-
         result = response.results
-        transcript = result.channels[0].alternatives[0].transcript
-        confidence = result.channels[0].alternatives[0].confidence
+        transcript = result.channels[0].alternatives[0].transcript or ""
+        confidence = result.channels[0].alternatives[0].confidence or 0.0
         detected_lang = result.channels[0].detected_language or "en"
         duration = response.metadata.duration if hasattr(response, 'metadata') else 0.0
 

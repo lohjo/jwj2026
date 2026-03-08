@@ -193,6 +193,69 @@ async def echo_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     await update.message.reply_text(text)
 
 
+# ── Auto-research helper: triggers when content is flagged ─────────────────────
+async def _auto_research_if_flagged(
+    content_preview: str,
+    detection_result: dict | None,
+    misinfo_result: dict | None,
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+) -> None:
+    """
+    If detection flags content as AI-generated or unsafe, automatically run
+    the research_agent to find corroborating web evidence and save the report
+    under research/summaries/.
+
+    Runs as a background task so it doesn't block the user response.
+    """
+    is_ai = (detection_result or {}).get("is_ai_generated") is True
+    is_unsafe = (detection_result or {}).get("safety_flag") == "unsafe"
+    is_misinfo = (misinfo_result or {}).get("misinformation_detected") is True
+
+    if not (is_ai or is_unsafe or is_misinfo):
+        return  # content is clean — skip
+
+    # Build a research query from the content
+    label = (detection_result or {}).get("label", "AI-generated")
+    query = f"fact check: {content_preview[:200]}"
+
+    try:
+        from research_agent import research as do_research
+
+        result = await do_research(query)
+
+        if result.summary_path:
+            from pathlib import Path
+            summary_text = Path(result.summary_path).read_text(encoding="utf-8")
+            preview = summary_text[:600]
+            reason = []
+            if is_ai:
+                reason.append("AI-generated")
+            if is_unsafe:
+                reason.append("unsafe")
+            if is_misinfo:
+                reason.append("misinformation")
+            reason_str = ", ".join(reason)
+
+            await update.message.reply_text(
+                f"🔎 <b>Auto-Research</b> (flagged as {reason_str})\n\n"
+                f"{preview}\n\n"
+                f"({len(result.sources)} sources analysed)",
+                parse_mode="HTML",
+            )
+            # Also send the full report as a file
+            with open(result.summary_path, "rb") as f:
+                await context.bot.send_document(
+                    chat_id=update.effective_chat.id,
+                    document=f,
+                    filename=Path(result.summary_path).name,
+                )
+        else:
+            logging.info("Auto-research returned no summary for flagged content")
+    except Exception:
+        logging.exception("Auto-research failed for flagged content")
+
+
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """
     Handle plain text messages with multilingual translation and detection pipeline.
@@ -345,6 +408,13 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
                     logging.exception("translate_from_english failed; using English response")
 
             await update.message.reply_text(final_response, parse_mode="HTML")
+
+            # Auto-research if flagged
+            asyncio.create_task(
+                _auto_research_if_flagged(
+                    english_text, detection_result, misinfo_result, update, context
+                )
+            )
         except Exception as e:
             result = f"Detection error: {e}"
             logging.exception("Error in handle_text pipeline")
@@ -449,6 +519,13 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                 response = await translate_from_english(response, source_lang, runner, user_id, session_id)
 
         await update.message.reply_text(response, parse_mode="HTML")
+
+        # Auto-research if flagged
+        asyncio.create_task(
+            _auto_research_if_flagged(
+                guard_input, detection_result, misinfo_result, update, context
+            )
+        )
 
         # Log
         if log_to_clickhouse:
@@ -556,6 +633,13 @@ async def handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                 response = await translate_from_english(response, source_lang, runner, user_id, session_id)
 
         await update.message.reply_text(response, parse_mode="HTML")
+
+        # Auto-research if flagged
+        asyncio.create_task(
+            _auto_research_if_flagged(
+                english_text, detection_result, None, update, context
+            )
+        )
 
         # Step 8: Optional TTS voice reply
         try:
@@ -679,6 +763,13 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
         await update.message.reply_text(response)
 
+        # Auto-research if flagged
+        asyncio.create_task(
+            _auto_research_if_flagged(
+                guard_input, detection_result, None, update, context
+            )
+        )
+
         # Log
         if log_to_clickhouse:
             asyncio.create_task(asyncio.to_thread(
@@ -704,6 +795,73 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     except Exception as e:
         logging.exception("Error in handle_video")
         await update.message.reply_text(f"❌ Video analysis failed: {e}")
+
+
+async def crawl_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/crawl <query or URLs> — Crawl web pages, detect AI content, save flagged results to .md."""
+    args = context.args if hasattr(context, "args") else []
+    raw_input = " ".join(args).strip()
+    if not raw_input:
+        await update.message.reply_text("Usage: /crawl <search query or URLs>")
+        return
+
+    user_id = str(update.effective_user.id)
+    if not await check_rate_limit(user_id, update):
+        return
+
+    try:
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+    except Exception:
+        pass
+
+    await update.message.reply_text("🕷️ Crawling and analysing, please wait...")
+
+    try:
+        from web_crawler import crawl_and_flag
+
+        # If the input looks like URLs, split them; otherwise treat as search query
+        tokens = raw_input.split()
+        explicit_urls = [t for t in tokens if t.startswith("http://") or t.startswith("https://")]
+        query = " ".join(t for t in tokens if t not in explicit_urls) or raw_input
+
+        report_path = await crawl_and_flag(
+            query=query,
+            urls=explicit_urls if explicit_urls else None,
+        )
+
+        # Read and preview the report
+        report_text = report_path.read_text(encoding="utf-8")
+        preview = report_text[:800]
+        await update.message.reply_text(
+            f"📄 <b>Crawl Report</b>\n\n<pre>{preview}</pre>",
+            parse_mode="HTML",
+        )
+
+        # Send full report as file attachment
+        with open(report_path, "rb") as f:
+            await context.bot.send_document(
+                chat_id=update.effective_chat.id,
+                document=f,
+                filename=report_path.name,
+            )
+
+        # Log to ClickHouse
+        if log_to_clickhouse:
+            session_id = await get_or_create_session(user_id)
+            asyncio.create_task(asyncio.to_thread(
+                log_to_clickhouse,
+                {
+                    "user_id": user_id,
+                    "session_id": session_id,
+                    "content_type": "text",
+                    "content_preview": f"crawl: {query[:480]}",
+                    "guard_verdict": "human_generated",
+                    "explanation": f"Web crawl query: {query}",
+                }
+            ))
+    except Exception as exc:
+        logging.exception("Error in crawl_command")
+        await update.message.reply_text(f"❌ Crawl failed: {exc}")
 
 
 async def research_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -946,6 +1104,7 @@ def start_bot():
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("detect", detect_command))
     app.add_handler(CommandHandler("research", research_command))
+    app.add_handler(CommandHandler("crawl", crawl_command))
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_text))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, handle_audio))
