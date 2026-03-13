@@ -1,34 +1,37 @@
 """
-Run SQL files against ClickHouse Cloud in order.
+db/run_sql.py — Run SQL files against ClickHouse Cloud in order.
 
 Replaces the clickhouse-client --queries-file workflow using the
 clickhouse-connect Python driver (already in requirements.txt).
 
-Usage:
-    python run_sql.py                       # runs all sql/*.sql in sorted order
-    python run_sql.py sql/00_create_db.sql  # runs a single file
+Usage (from repo root):
+    python -m db.run_sql                         # runs all db/sql/*.sql in sorted order
+    python -m db.run_sql db/sql/00_create_db.sql # runs a single file
 """
 
 import glob
-import os
 import sys
 from pathlib import Path
 
 import clickhouse_connect
-"""Phase 0 — Verify ClickHouse Cloud connectivity."""
-    
+
+from config import (
+    CLICKHOUSE_HOST,
+    CLICKHOUSE_PORT,
+    CLICKHOUSE_USER,
+    CLICKHOUSE_PASSWORD,
+)
+
 
 def get_client():
+    """Return a ClickHouse Cloud client using credentials from config.py."""
     return clickhouse_connect.get_client(
-        host=os.getenv(
-            "CLICKHOUSE_HOST",
-            "e8vpdqdapz.asia-southeast1.gcp.clickhouse.cloud",
-        ),
-        port=int(os.getenv("CLICKHOUSE_PORT", 8443)),
-        username=os.getenv("CLICKHOUSE_USER", "default"),
-        password=os.getenv("CLICKHOUSE_PASSWORD", "Y1JF.jPt_rb8o"),
+        host=CLICKHOUSE_HOST,
+        port=CLICKHOUSE_PORT,
+        username=CLICKHOUSE_USER,
+        password=CLICKHOUSE_PASSWORD,
         secure=True,
-        connect_timeout=30,   # increase from default 10s
+        connect_timeout=30,
         send_receive_timeout=60,
     )
 
