@@ -1,6 +1,6 @@
-# SENTINEL
+# jwjBot
 
-SENTINEL is a multimodal AI-generated content detection system built around a Telegram bot workflow. It analyzes text, images, audio, and video, then returns a structured verdict with confidence and explanation.
+jwjBot is a multimodal AI-generated content detection system built around a Telegram bot workflow. It analyzes text, images, audio, and video, then returns a structured verdict with confidence and explanation.
 
 The runtime is modular:
 - [telegram_bot.py](telegram_bot.py) for handlers
