@@ -1,63 +1,131 @@
-# AI Content Detection — First Release
+# SENTINEL
 
-Description
-- Short: A pragmatic AI content detection toolkit and Telegram bot that analyses text, images, audio, and video for likely AI-generation signals. Core orchestration lives in the Telegram handler and the ADK-based agent pipeline. See [telegram_bot.py](telegram_bot.py) and [ai_agent_adk/agent.py](ai_agent_adk/agent.py).
-- Focus: a defensible detection flow (OCR → language detection → translate → GUARD detection → explanation) that pairs model APIs (Gemini / SEA-LION) with deterministic media processing.
+SENTINEL is a multimodal AI-generated content detection system built around a Telegram bot workflow. It analyzes text, images, audio, and video, then returns a structured verdict with confidence and explanation.
 
-Interesting techniques
-- **Async pipelines**: handlers use Python `async`/`await` to keep I/O (HTTP, file downloads, transcription) non-blocking — see Python asyncio docs: https://docs.python.org/3/library/asyncio.html
-- **Shared async HTTP client**: a single `httpx.AsyncClient` is reused for connection pooling, sensible timeouts and efficient concurrency: https://www.python-httpx.org/
-- **Multimodal orchestration**: images use Gemini for captioning + OCR while audio uses Deepgram for STT; these signals are fused into a single detection input.
-- **Safe translation bridge**: explicit detect → translate-to-English → detect → translate-back flow via an ADK translator subagent to match model assumptions.
-- **Background telemetry**: non-blocking logging (e.g., ClickHouse) is scheduled via `asyncio.create_task` and thread offload to avoid response latency.
-- **Transient storage + cleanup**: downloaded media are stored in a local `downloads/` folder with explicit cleanup to avoid disk growth.
-- **Lightweight rate-limiting & session reuse**: per-user cooldowns and an `InMemorySessionService` are used to avoid repeated heavy initialisation.
-- **Model/tool compatibility layers**: the repo contains shims for Gemma-style and reasoning models and builds tool schemas for function-calling integrations.
+The runtime is modular:
+- [telegram_bot.py](telegram_bot.py) for handlers
+- [pipeline/](pipeline/) for detection, translation, formatting, and logging
+- [media/](media/) for image/audio/video processing
+- [research_agent/](research_agent/) for Firecrawl-based research enrichment
+- [config.py](config.py) as the only environment-variable access layer
 
-Non-obvious technologies & libraries
-- google-genai / Gemini — Google GenAI client for image/text multimodal analysis: https://developers.generativeai.google
-- google-adk — ADK `Agent` and `Runner` usage for subagents and tool orchestration (see `ai_agent_adk/agent.py`).
-- python-telegram-bot — async Telegram bot framework used for handlers and polling: https://docs.python-telegram-bot.org/
-- httpx — async HTTP client for robust, async-friendly requests and connection pooling: https://www.python-httpx.org/
-- deepgram-sdk — speech-to-text (Nova models) for reliable audio transcription: https://developers.deepgram.com/
-- elevenlabs — text-to-speech for optional voice replies: https://github.com/elevenlabs/elevenlabs-python
-- opencv-python-headless — image/frame processing in headless servers: https://pypi.org/project/opencv-python-headless/
-- pydub — convenient audio extraction and format handling for video workflows: https://github.com/jiaaro/pydub
-- imagehash — perceptual hashing helpers for image-similarity checks: https://pypi.org/project/ImageHash/
-- langdetect — language detection used to gate translation and detection steps: https://pypi.org/project/langdetect/
-- python-dotenv — local `.env` loading: https://pypi.org/project/python-dotenv/
+## User Instructions
 
-External links
-- `python-telegram-bot`: https://docs.python-telegram-bot.org/
-- `google genai / Gemini`: https://developers.generativeai.google
-- `httpx`: https://www.python-httpx.org/
-- `deepgram`: https://developers.deepgram.com/
-- `elevenlabs`: https://github.com/elevenlabs/elevenlabs-python
-- `opencv-python-headless`: https://pypi.org/project/opencv-python-headless/
-- `Pillow`: https://pillow.readthedocs.io/
-- `pydub`: https://github.com/jiaaro/pydub
-- `langdetect`: https://pypi.org/project/langdetect/
-- `imagehash`: https://pypi.org/project/ImageHash/
-- `python-dotenv`: https://pypi.org/project/python-dotenv/
+### 1. Set up your environment
 
-Project structure
+1. Create and activate a Python virtual environment.
+2. Install dependencies:
+
+```bash
+pip install -r requirements.txt
 ```
-ai_agent_adk/
-tests/
+
+### 2. Configure API keys
+
+1. Copy [`.env.example`](.env.example) to `.env`.
+2. Fill in required values:
+  - `TELEGRAM_TOKEN`
+  - `OPENAI_API_KEY` (SEA-LION)
+  - `GEMINI_API_KEY`
+3. Optional but recommended:
+  - `GROQ_API_KEY` for fallback LLM
+  - `DEEPGRAM_API_KEY` and `ELEVENLABS_API_KEY` for audio workflows
+  - `FIRECRAWL_API_KEY` for `/research`
+  - ClickHouse values for telemetry logging
+
+Configuration is loaded by [config.py](config.py).
+
+### 3. Run the bot
+
+From the project root:
+
+```bash
+python telegram_bot.py
 ```
-- `ai_agent_adk/`: agent bootstrap, tool definitions and translator subagent. Contains the ADK `Agent`/`Runner` wiring, model-tool schema builders, and multimodal wrappers used at runtime.
-- `tests/`: pytest tests that exercise bot message formatting and media handlers.
-- Implied runtime folders: `downloads/` (created at runtime for temporary media), and other transient folders produced during processing (e.g., temp audio exports).
 
-Key files
-- Bot & orchestration: [telegram_bot.py](telegram_bot.py)
-- Text detector: [text_detector.py](text_detector.py)
-- Agent bootstrap: [ai_agent_adk/agent.py](ai_agent_adk/agent.py)
-- Tooling & integrations: [ai_agent_adk/tools.py](ai_agent_adk/tools.py)
-- OCR/video glue: [ocr.py](ocr.py)
+### 4. Use in Telegram
 
-Notes
-- No web fonts or frontend assets are referenced by the codebase.
-- Licensing: no `LICENSE` file detected — add one if you intend to publish this project.
+Supported commands:
+- `/start` — Show welcome message
+- `/help` — Show usage help
+- `/detect <text>` — Analyze text directly
+- `/research <query>` — Run web research and summarization
 
-If you want additional sections (Security considerations, Contributing, or a short example configuration snippet), say which and I will add them.
+You can also send:
+- Plain text messages
+- Images
+- Voice/audio files
+- Videos
+
+The bot returns an HTML-formatted verdict, confidence score, and explanation.
+
+### 5. Run tests
+
+```bash
+python -m pytest tests/ -v
+```
+
+## Interesting Techniques
+
+- Asynchronous orchestration with Python `async`/`await` and `asyncio.gather` for parallel detection stages:
+  [Python asyncio docs](https://docs.python.org/3/library/asyncio.html)
+- Thread offloading for blocking SDK calls using `asyncio.to_thread()` to keep Telegram handlers responsive:
+  [asyncio.to_thread](https://docs.python.org/3/library/asyncio-task.html#asyncio.to_thread)
+- Reused async HTTP client patterns using [httpx](https://www.python-httpx.org/) for API-bound modules.
+- Strict language bridge flow (detect -> translate to English -> detect -> translate back) in [pipeline/translator.py](pipeline/translator.py).
+- Centralized LLM gateway with automatic fallback (Gemini -> Groq) in [pipeline/insights.py](pipeline/insights.py).
+- Non-blocking telemetry writes to ClickHouse in [pipeline/logger.py](pipeline/logger.py), keeping user response paths fast.
+- Structured fallback contracts for detection functions to avoid exception leaks into Telegram handlers.
+
+## Non-Obvious Technologies and Libraries
+
+- [SEA-LION GUARD](https://huggingface.co/aisingapore/SEA-LION-GUARD) for AI-generation detection.
+- [Google Generative AI Python SDK](https://github.com/google-gemini/deprecated-generative-ai-python) for primary LLM integration (current code path).
+- [OpenAI Python SDK](https://github.com/openai/openai-python) used with Groq OpenAI-compatible endpoint for fallback inference.
+- [Deepgram Python SDK](https://developers.deepgram.com/docs/python-sdk) for STT (`nova-2-general`) in [media/audio.py](media/audio.py).
+- [ElevenLabs Python SDK](https://github.com/elevenlabs/elevenlabs-python) for multilingual TTS in [media/audio.py](media/audio.py).
+- [Firecrawl](https://www.firecrawl.dev/) API integration in [research_agent/crawler.py](research_agent/crawler.py) for search + scrape workflows.
+- [clickhouse-connect](https://github.com/ClickHouse/clickhouse-connect) for asynchronous insert logging.
+- [opencv-python-headless](https://pypi.org/project/opencv-python-headless/) for frame extraction in [media/video.py](media/video.py).
+- [Pillow](https://python-pillow.org/) and [pytesseract](https://github.com/madmaze/pytesseract) for OCR/image processing in [media/image.py](media/image.py).
+- [langdetect](https://pypi.org/project/langdetect/) for text language detection guardrails in [pipeline/translator.py](pipeline/translator.py).
+
+No custom web fonts are used in this repository.
+
+## Project Structure
+
+```text
+.
+├── app.py
+├── CLAUDE.md
+├── config.py
+├── pyproject.toml
+├── requirements.txt
+├── run_sql.py
+├── telegram_bot.py
+├── verify_clickhouse.py
+├── verify_sdk_consistency.py
+├── ai_agent_adk/
+├── downloads/
+├── firecrawl_folder/
+├── frames/
+├── markdowns/
+│   ├── old/
+│   └── new/
+├── media/
+├── pipeline/
+├── research/
+│   ├── raw/
+│   ├── skills/
+│   └── summaries/
+├── research_agent/
+├── tests/
+└── uploads/
+```
+
+- [pipeline/](pipeline/): Core detection pipeline modules (guard, insights, translator, formatter, logger, orchestration).
+- [media/](media/): Multimodal processing modules (image OCR/manipulation, audio STT/TTS, video analysis).
+- [research_agent/](research_agent/): Web research orchestration, crawling, summarization, and cache.
+- [research/](research/): Generated research outputs (raw captures, summaries, reusable skill notes).
+- [markdowns/](markdowns/): Documentation split into historical and current refactor docs.
+- [tests/](tests/): Unit tests with external API mocking and async coverage.

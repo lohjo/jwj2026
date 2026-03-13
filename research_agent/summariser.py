@@ -1,146 +1,106 @@
-"""Summarise research sources and generate skill cards."""
+"""
+research_agent/summariser.py — LLM summarisation via call_llm().
 
-import asyncio
+All LLM calls go through pipeline.insights.call_llm() (Gemini → Groq fallback).
+"""
+
+import json
 import logging
-import os
+import re
 from datetime import date
+
+from pipeline.insights import call_llm
 
 logger = logging.getLogger(__name__)
 
+SUMMARY_PROMPT = """
+You are a research analyst. Summarise the following web content into two documents.
 
-def _call_gemini(prompt: str) -> str | None:
-    """Synchronous Gemini call (run via asyncio.to_thread)."""
-    try:
-        import google.genai as genai
-
-        api_key = os.getenv("GEMINI_API_KEY", "")
-        if not api_key:
-            logger.warning("[Summariser] GEMINI_API_KEY not set")
-            return None
-
-        client = genai.Client(api_key=api_key)
-        model = os.getenv("MODEL_NAME", "gemini-2.5-flash")
-        resp = client.models.generate_content(model=model, contents=prompt)
-        return resp.text
-    except Exception:
-        logger.exception("[Summariser] Gemini call failed")
-        return None
-
-
-async def summarise_pages(query: str, pages) -> str:
-    """
-    Produce a structured Markdown summary from deduplicated pages.
-
-    Args:
-        query: The original research question.
-        pages: List of FetchedPage objects.
-
-    Returns:
-        Markdown summary string.
-    """
-    combined = "\n\n---\n\n".join(
-        f"Source: {p.url}\n{p.text[:3000]}" for p in pages[:8]
-    )
-
-    prompt = f"""You are a research assistant. Summarise the following web sources 
-into a structured Markdown document answering the question: "{query}"
+Query: {query}
 
 Sources:
-{combined}
+{sources_text}
 
-Output format:
-# Research Summary: {{topic}}
-
-## Key Findings
-- Bullet points of most important facts
-
-## Details
-Comprehensive paragraph-form summary
-
-## Sources
-- Numbered list of source URLs used
+Respond ONLY with a JSON object (no markdown fences):
+{{
+  "summary_md": "# {query}\\n\\n## Overview\\n...\\n\\n## Key Findings\\n...\\n\\n## Sources\\n...",
+  "skill_md": "---\\ntopic: {topic_slug}\\nlast_updated: {today}\\nsources: [{source_list}]\\nconfidence: high|medium|low\\n---\\n\\n# {query}\\n\\n## Key Facts\\n- ...\\n\\n## Code Patterns\\n```\\n# if applicable\\n```\\n\\n## Gotchas\\n- ...\\n\\n## Do Not Search Again If\\n- ..."
+}}
 
 Rules:
-- Be factual and concise
-- Cite which source each finding comes from
-- If sources conflict, note the disagreement
-- Do not fabricate information beyond what the sources provide"""
-
-    result = await asyncio.to_thread(_call_gemini, prompt)
-    return result or f"# Research Summary\n\nSummarisation failed for query: {query}"
+- summary_md is for humans: clear prose, headers, bullet points
+- skill_md is for the AI model: facts only, no filler, include working code if relevant
+- Both must directly answer the query using the sources provided
+- Do not invent facts not present in the sources
+"""
 
 
-async def generate_skill_card(query: str, summary: str, sources: list[str]) -> str:
+def _slugify(text: str, max_len: int = 40) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "_", text.lower()).strip("_")
+    return slug[:max_len]
+
+
+async def summarise(query: str, scraped_pages: list[dict]) -> dict:
     """
-    Generate a model-facing skill card from a summary.
+    Produce structured summary from scraped pages.
 
     Args:
-        query: The original research question.
-        summary: The Markdown summary text.
-        sources: List of source URLs.
+        query: Original research query.
+        scraped_pages: List of dicts from crawler.search_and_scrape().
 
     Returns:
-        Skill card Markdown string.
+        {
+          "summary_md": str,
+          "skill_md": str,
+          "sources": list[str],
+          "llm_used": str
+        }
     """
+    sources = [p["url"] for p in scraped_pages if p.get("url")]
     source_list = ", ".join(sources[:5])
     today = date.today().isoformat()
+    topic_slug = _slugify(query)
 
-    prompt = f"""Convert this research summary into a concise skill card for an AI agent.
+    sources_text = "\n\n---\n\n".join(
+        f"Source: {p['url']}\nTitle: {p.get('title', '')}\n{p['markdown'][:3000]}"
+        for p in scraped_pages[:8]
+    )
 
-Summary:
-{summary[:4000]}
+    prompt = SUMMARY_PROMPT.format(
+        query=query,
+        sources_text=sources_text,
+        topic_slug=topic_slug,
+        today=today,
+        source_list=source_list,
+    )
 
-Use this exact template:
+    raw, llm_used = await call_llm(prompt, max_tokens=2048)
 
----
-topic: {{topic derived from the query}}
-last_updated: {today}
-sources: [{source_list}]
-confidence: high | medium | low
----
+    if raw:
+        try:
+            clean = re.sub(
+                r"^```(?:json)?\s*|\s*```$", "", raw.strip(), flags=re.MULTILINE
+            ).strip()
+            parsed = json.loads(clean)
+            return {
+                "summary_md": parsed.get("summary_md", ""),
+                "skill_md": parsed.get("skill_md", ""),
+                "sources": sources,
+                "llm_used": llm_used,
+            }
+        except (json.JSONDecodeError, Exception) as e:
+            logger.warning("[Summariser] JSON parse failed, using raw response: %s", e)
+            return {
+                "summary_md": raw,
+                "skill_md": "",
+                "sources": sources,
+                "llm_used": llm_used,
+            }
 
-# {{Topic Title}}
-
-## Key Facts
-- Bullet-point distilled facts only — no filler prose
-
-## Code Patterns
-```
-# Minimal working example if applicable (omit if not relevant)
-```
-
-## Gotchas
-- Known failure modes, edge cases, version-specific behaviour
-
-## Do Not Search Again If
-- Conditions under which this skill is sufficient
-
-Rules:
-- Keep it under 500 words
-- Only include verified facts from the summary
-- Set confidence based on source quality and agreement"""
-
-    result = await asyncio.to_thread(_call_gemini, prompt)
-    if result:
-        return result
-
-    # Fallback: minimal skill card
-    return f"""---
-topic: {query}
-last_updated: {today}
-sources: [{source_list}]
-confidence: low
----
-
-# {query}
-
-## Key Facts
-- Auto-generated skill card — summarisation failed
-- See raw sources for details
-
-## Gotchas
-- Skill card was not AI-summarised; review raw data
-
-## Do Not Search Again If
-- Never — always re-search until a proper skill card is generated
-"""
+    # Total failure
+    return {
+        "summary_md": f"# Research Summary\n\nSummarisation failed for query: {query}",
+        "skill_md": f"---\ntopic: {topic_slug}\nlast_updated: {today}\nsources: [{source_list}]\nconfidence: low\n---\n\n# {query}\n\n## Key Facts\n- Summarisation failed — see raw sources",
+        "sources": sources,
+        "llm_used": llm_used,
+    }

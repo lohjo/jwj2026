@@ -1,19 +1,43 @@
-python-telegram-bot==22.6
-fastapi
-uvicorn
-python-multipart
-Pillow
-google-genai
-google-adk
-python-dotenv
-langdetect
+# Telegram
+python-telegram-bot>=21.0
+
+# SEA-LION / OpenAI-compatible APIs
+openai>=1.30
+
+# Gemini
+google-genai>=1.0
+
+# Google ADK
+google-adk>=0.4
+
+# Claude Code SDK
+claude-code-sdk>=0.0.25
+
+# Speech
+deepgram-sdk>=3.5
+elevenlabs>=1.0
+
+# Image / Video
+Pillow>=10.0
+pytesseract>=0.3
+opencv-python-headless>=4.9
+
+# Research Agent
+firecrawl-py>=1.0
+
+# ClickHouse
+clickhouse-connect>=0.7
+
+# Language detection
+langdetect>=1.0.9
+
+# HTTP
 httpx>=0.27
-deepgram-sdk>=3.0.0
-elevenlabs>=1.0.0
-opencv-python-headless
-imagehash
-pydub
-clickhouse-connect
-trafilatura>=1.8
-sentence-transformers>=3.0
-numpy>=1.26
+
+# Utilities
+python-dotenv>=1.0
+
+# Tests
+pytest>=8.0
+pytest-asyncio>=0.23
+pytest-mock>=3.14

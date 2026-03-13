@@ -1,0 +1,37 @@
+[
+  {
+    "index": 1,
+    "url": "https://www.ciis.org.cn/gjwtyj/qkml/202007/P020231115471600195270.pdf",
+    "domain": "www.ciis.org.cn",
+    "word_count": 3678,
+    "fetched_at": "2026-03-13T08:27:56.822519"
+  },
+  {
+    "index": 2,
+    "url": "https://harian-indonesia.com/assets/file/2025/05/20250513.pdf",
+    "domain": "harian-indonesia.com",
+    "word_count": 12560,
+    "fetched_at": "2026-03-13T08:27:56.824071"
+  },
+  {
+    "index": 3,
+    "url": "https://feeds.acast.com/public/shows/650afc338680f900125f408d",
+    "domain": "feeds.acast.com",
+    "word_count": 28026,
+    "fetched_at": "2026-03-13T08:27:56.827397"
+  },
+  {
+    "index": 4,
+    "url": "https://journals.plos.org/plosone/article/asset?unique&id=info:doi/10.1371/journal.pone.0322556.s001",
+    "domain": "journals.plos.org",
+    "word_count": 6735,
+    "fetched_at": "2026-03-13T08:27:56.828357"
+  },
+  {
+    "index": 5,
+    "url": "https://www.omnycontent.com/d/playlist/d9486183-3dd4-4ad6-aebe-a4c1008455d5/d14a562d-2c6f-465d-80d2-ae44009af53e/77c8885e-9b24-4fb4-a01c-ae44009bc0f1/podcast.rss",
+    "domain": "www.omnycontent.com",
+    "word_count": 69247,
+    "fetched_at": "2026-03-13T08:27:56.829520"
+  }
+]

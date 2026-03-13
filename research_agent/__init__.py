@@ -1,5 +1,5 @@
 """research_agent — Web research subagent for SENTINEL."""
 
-from research_agent.agent import research, ResearchResult
+from research_agent.agent import research
 
-__all__ = ["research", "ResearchResult"]
+__all__ = ["research"]
