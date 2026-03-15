@@ -16,6 +16,7 @@ claude-code-sdk>=0.0.25
 # Speech
 deepgram-sdk>=3.5
 elevenlabs>=1.0
+pydub>=0.25
 
 # Image / Video
 Pillow>=10.0
