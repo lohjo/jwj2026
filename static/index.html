@@ -541,6 +541,26 @@
             color: var(--text-secondary);
         }
 
+        .claims-list {
+            margin-top: 0.75rem;
+        }
+
+        .claims-list strong {
+            font-size: 11px;
+            color: var(--text-tertiary);
+        }
+
+        .claims-list ul {
+            margin-top: 0.375rem;
+            padding-left: 1.25rem;
+        }
+
+        .claims-list li {
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-bottom: 0.25rem;
+        }
+
         /* Copy button */
         .copy-btn {
             display: inline-flex;
@@ -1185,8 +1205,8 @@
 
             let claimsHtml = '';
             if (misinfo.claims && misinfo.claims.length > 0) {
-                claimsHtml = '<div style="margin-top:0.75rem;"><strong style="font-size:11px; color:var(--text-tertiary);">Suspicious Claims:</strong><ul style="margin-top:0.375rem; padding-left:1.25rem;">' +
-                    misinfo.claims.map(c => `<li style="font-size:12px; color:var(--text-secondary); margin-bottom:0.25rem;">${escapeHtml(c)}</li>`).join('') +
+                claimsHtml = '<div class="claims-list"><strong>Suspicious Claims:</strong><ul>' +
+                    misinfo.claims.map(c => `<li>${escapeHtml(c)}</li>`).join('') +
                     '</ul></div>';
             }
 
@@ -1295,6 +1315,9 @@
                     btn.classList.remove('copied');
                     btn.innerHTML = '\uD83D\uDCCB Copy Results';
                 }, 2000);
+            }).catch(() => {
+                btn.innerHTML = '\u274C Copy failed';
+                setTimeout(() => { btn.innerHTML = '\uD83D\uDCCB Copy Results'; }, 2000);
             });
         }
 
@@ -1430,7 +1453,8 @@
                 document.getElementById('audio-response').style.display = 'none';
 
             } catch (e) {
-                alert('Microphone access denied. Please allow microphone access.');
+                document.getElementById('voice-status').className = 'voice-status';
+                document.getElementById('voice-status').textContent = '\u274C Microphone access denied. Please allow microphone access.';
                 console.error('Mic error:', e);
             }
         }
