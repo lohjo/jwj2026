@@ -28,6 +28,7 @@ from pipeline.formatter import format_detection_message
 from pipeline.logger import log_to_clickhouse
 from media.image import extract_text_from_image, analyse_image_with_gemini, detect_image_manipulation
 from media.audio import transcribe_audio, synthesise_speech
+from media import live
 from media.video import analyse_video
 
 logging.basicConfig(level=logging.INFO)
@@ -505,15 +506,30 @@ async def handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         )
         await update.message.reply_text(response, parse_mode="HTML")
 
-        # Step 8: TTS voice reply
+        # Step 8: Voice reply — try Gemini Live API first, fall back to ElevenLabs
         try:
-            tts_path = f"downloads/tts_{audio.file_id}.mp3"
-            tts_output = await synthesise_speech(explanation, tts_path, language=source_lang)
-            if tts_output:
+            with open(audio_path, "rb") as f:
+                raw_audio = f.read()
+            live_ogg = await live.live_voice_exchange(
+                audio_bytes=raw_audio,
+                mime_type="audio/ogg" if ext == ".ogg" else "audio/mpeg",
+                system_context=explanation,
+            )
+            if live_ogg:
+                tts_path = f"downloads/live_{audio.file_id}.ogg"
+                with open(tts_path, "wb") as f:
+                    f.write(live_ogg)
                 with open(tts_path, "rb") as voice_file:
                     await update.message.reply_voice(voice=voice_file)
+            else:
+                # Fallback to ElevenLabs TTS
+                tts_path = f"downloads/tts_{audio.file_id}.mp3"
+                tts_output = await synthesise_speech(explanation, tts_path, language=source_lang)
+                if tts_output:
+                    with open(tts_path, "rb") as voice_file:
+                        await update.message.reply_voice(voice=voice_file)
         except Exception:
-            logger.info("TTS reply skipped — ElevenLabs unavailable or failed")
+            logger.info("TTS reply skipped — Live API and ElevenLabs both unavailable")
 
         # Background tasks
         asyncio.create_task(
