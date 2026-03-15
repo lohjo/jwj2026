@@ -1,0 +1,868 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SENTINEL — AI Content Detection</title>
+    <style>
+        :root {
+            --bg-primary: #0f172a;
+            --bg-secondary: #1e293b;
+            --bg-card: #1e293b;
+            --bg-input: #334155;
+            --text-primary: #f1f5f9;
+            --text-secondary: #94a3b8;
+            --text-muted: #64748b;
+            --accent: #3b82f6;
+            --accent-hover: #2563eb;
+            --success: #22c55e;
+            --warning: #f59e0b;
+            --danger: #ef4444;
+            --border: #334155;
+            --radius: 12px;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+            border-bottom: 1px solid var(--border);
+            padding: 1.5rem 2rem;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 1.75rem;
+            font-weight: 700;
+            background: linear-gradient(135deg, #3b82f6, #8b5cf6);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 0.25rem;
+        }
+
+        .header p {
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+        }
+
+        .container {
+            max-width: 1100px;
+            margin: 0 auto;
+            padding: 1.5rem;
+        }
+
+        .tabs {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 1.5rem;
+            flex-wrap: wrap;
+        }
+
+        .tab {
+            padding: 0.75rem 1.25rem;
+            border-radius: var(--radius);
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            color: var(--text-secondary);
+            cursor: pointer;
+            font-size: 0.9rem;
+            font-weight: 500;
+            transition: all 0.2s;
+        }
+
+        .tab:hover { border-color: var(--accent); color: var(--text-primary); }
+        .tab.active { background: var(--accent); color: white; border-color: var(--accent); }
+
+        .panel { display: none; }
+        .panel.active { display: block; }
+
+        .card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .card h2 {
+            font-size: 1.1rem;
+            margin-bottom: 1rem;
+            color: var(--text-primary);
+        }
+
+        textarea, input[type="text"] {
+            width: 100%;
+            background: var(--bg-input);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 0.75rem 1rem;
+            color: var(--text-primary);
+            font-size: 0.95rem;
+            resize: vertical;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+
+        textarea:focus, input[type="text"]:focus {
+            border-color: var(--accent);
+        }
+
+        textarea { min-height: 120px; }
+
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.75rem 1.5rem;
+            border-radius: 8px;
+            border: none;
+            font-size: 0.9rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .btn-primary { background: var(--accent); color: white; }
+        .btn-primary:hover { background: var(--accent-hover); }
+        .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        .btn-danger { background: var(--danger); color: white; }
+        .btn-danger:hover { background: #dc2626; }
+
+        .btn-success { background: var(--success); color: white; }
+
+        .file-upload {
+            border: 2px dashed var(--border);
+            border-radius: var(--radius);
+            padding: 2rem;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s;
+            position: relative;
+        }
+
+        .file-upload:hover { border-color: var(--accent); }
+
+        .file-upload input[type="file"] {
+            position: absolute;
+            inset: 0;
+            opacity: 0;
+            cursor: pointer;
+        }
+
+        .file-upload .icon { font-size: 2rem; margin-bottom: 0.5rem; }
+        .file-upload .label { color: var(--text-secondary); font-size: 0.9rem; }
+        .file-upload .filename { color: var(--accent); font-size: 0.85rem; margin-top: 0.5rem; }
+
+        .result-box {
+            background: var(--bg-primary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 1rem;
+            margin-top: 1rem;
+            white-space: pre-wrap;
+            font-family: 'SF Mono', Monaco, monospace;
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        .result-box.success { border-color: var(--success); }
+        .result-box.error { border-color: var(--danger); }
+
+        .loading {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+        }
+
+        .spinner {
+            width: 16px; height: 16px;
+            border: 2px solid var(--border);
+            border-top: 2px solid var(--accent);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* Voice recording UI */
+        .voice-section {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 1.5rem;
+            padding: 2rem 1rem;
+        }
+
+        .mic-button {
+            width: 120px; height: 120px;
+            border-radius: 50%;
+            background: var(--bg-input);
+            border: 3px solid var(--border);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 3rem;
+            transition: all 0.3s;
+            position: relative;
+        }
+
+        .mic-button:hover { border-color: var(--accent); transform: scale(1.05); }
+        .mic-button.recording {
+            border-color: var(--danger);
+            background: rgba(239, 68, 68, 0.1);
+            animation: pulse 1.5s infinite;
+        }
+
+        .mic-button.processing {
+            border-color: var(--accent);
+            background: rgba(59, 130, 246, 0.1);
+        }
+
+        @keyframes pulse {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); }
+            50% { box-shadow: 0 0 0 20px rgba(239, 68, 68, 0); }
+        }
+
+        .voice-status {
+            font-size: 1rem;
+            color: var(--text-secondary);
+            text-align: center;
+        }
+
+        .voice-status.recording { color: var(--danger); }
+        .voice-status.processing { color: var(--accent); }
+
+        .audio-player {
+            width: 100%;
+            max-width: 400px;
+            margin-top: 1rem;
+        }
+
+        .audio-player audio { width: 100%; }
+
+        .visualizer-container {
+            width: 200px;
+            height: 60px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 3px;
+        }
+
+        .viz-bar {
+            width: 4px;
+            background: var(--accent);
+            border-radius: 2px;
+            transition: height 0.1s;
+            min-height: 4px;
+        }
+
+        .recording .viz-bar { background: var(--danger); }
+
+        .features-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin-top: 1rem;
+        }
+
+        .feature-item {
+            background: var(--bg-primary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 1rem;
+            text-align: center;
+        }
+
+        .feature-item .icon { font-size: 1.5rem; margin-bottom: 0.5rem; }
+        .feature-item .name { font-size: 0.85rem; color: var(--text-secondary); }
+
+        .actions { display: flex; gap: 0.75rem; margin-top: 1rem; flex-wrap: wrap; }
+
+        @media (max-width: 640px) {
+            .container { padding: 1rem; }
+            .tabs { gap: 0.25rem; }
+            .tab { padding: 0.5rem 0.75rem; font-size: 0.8rem; }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🛡️ SENTINEL</h1>
+        <p>AI Content Detection — Text · Image · Audio · Video</p>
+    </div>
+
+    <div class="container">
+        <div class="tabs">
+            <div class="tab active" data-panel="text">📝 Text</div>
+            <div class="tab" data-panel="voice">🎙️ Voice (Live API)</div>
+            <div class="tab" data-panel="image">🖼️ Image</div>
+            <div class="tab" data-panel="video">🎬 Video</div>
+        </div>
+
+        <!-- ── Text Panel ──────────────────────────────────────── -->
+        <div id="panel-text" class="panel active">
+            <div class="card">
+                <h2>📝 Text Analysis</h2>
+                <p style="color:var(--text-secondary); margin-bottom:1rem; font-size:0.9rem;">
+                    Paste text to analyse for AI-generation, misinformation, and harmful content.
+                </p>
+                <textarea id="text-input" placeholder="Paste text here to analyse..."></textarea>
+                <div class="actions">
+                    <button class="btn btn-primary" id="btn-analyse-text" onclick="analyseText()">
+                        🔍 Analyse Text
+                    </button>
+                    <button class="btn btn-primary" id="btn-detect-misinfo" onclick="detectMisinfo()">
+                        📰 Check Misinformation
+                    </button>
+                </div>
+                <div id="text-result" class="result-box" style="display:none;"></div>
+            </div>
+        </div>
+
+        <!-- ── Voice Panel (Gemini Live API) ────────────────────── -->
+        <div id="panel-voice" class="panel">
+            <div class="card">
+                <h2>🎙️ Voice — Gemini Live API</h2>
+                <p style="color:var(--text-secondary); margin-bottom:0.5rem; font-size:0.9rem;">
+                    Speak to SENTINEL. Your audio is sent to Gemini Live API for real-time
+                    speech-to-speech analysis. Click the microphone to start recording.
+                </p>
+                <div class="voice-section">
+                    <div class="visualizer-container" id="visualizer">
+                        <!-- Bars added by JS -->
+                    </div>
+                    <button class="mic-button" id="mic-btn" onclick="toggleRecording()">
+                        🎙️
+                    </button>
+                    <div class="voice-status" id="voice-status">Click to start recording</div>
+                    <div class="audio-player" id="audio-response" style="display:none;">
+                        <p style="color:var(--text-secondary); font-size:0.85rem; margin-bottom:0.5rem;">
+                            🔊 SENTINEL Response:
+                        </p>
+                        <audio id="response-audio" controls></audio>
+                    </div>
+                </div>
+                <div id="voice-result" class="result-box" style="display:none;"></div>
+            </div>
+
+            <div class="card">
+                <h2>📁 Upload Audio File</h2>
+                <p style="color:var(--text-secondary); margin-bottom:1rem; font-size:0.9rem;">
+                    Upload a pre-recorded audio file for Gemini Live API analysis.
+                </p>
+                <div class="file-upload" id="audio-dropzone">
+                    <div class="icon">🎵</div>
+                    <div class="label">Drop audio file or click to browse</div>
+                    <div class="filename" id="audio-filename"></div>
+                    <input type="file" id="audio-file" accept="audio/*" onchange="handleAudioFile(this)">
+                </div>
+                <div class="actions">
+                    <button class="btn btn-primary" id="btn-upload-audio" onclick="uploadAudio()" disabled>
+                        🔊 Analyse Audio
+                    </button>
+                </div>
+                <div id="upload-audio-result" class="result-box" style="display:none;"></div>
+                <div class="audio-player" id="upload-audio-response" style="display:none;">
+                    <p style="color:var(--text-secondary); font-size:0.85rem; margin-bottom:0.5rem; margin-top:1rem;">
+                        🔊 SENTINEL Response:
+                    </p>
+                    <audio id="upload-response-audio" controls></audio>
+                </div>
+            </div>
+        </div>
+
+        <!-- ── Image Panel ─────────────────────────────────────── -->
+        <div id="panel-image" class="panel">
+            <div class="card">
+                <h2>🖼️ Image Analysis</h2>
+                <p style="color:var(--text-secondary); margin-bottom:1rem; font-size:0.9rem;">
+                    Upload an image to detect AI-generation, manipulation, or deepfake artifacts.
+                </p>
+                <div class="file-upload" id="image-dropzone">
+                    <div class="icon">🖼️</div>
+                    <div class="label">Drop image or click to browse</div>
+                    <div class="filename" id="image-filename"></div>
+                    <input type="file" id="image-file" accept="image/*" onchange="handleImageFile(this)">
+                </div>
+                <div id="image-preview" style="margin-top:1rem; text-align:center; display:none;">
+                    <img id="preview-img" style="max-width:100%; max-height:300px; border-radius:8px;">
+                </div>
+                <div class="actions">
+                    <button class="btn btn-primary" id="btn-detect-image" onclick="detectImage()" disabled>
+                        🔍 Detect AI Image
+                    </button>
+                    <button class="btn btn-primary" id="btn-detect-manip" onclick="detectManipulation()" disabled>
+                        🎭 Detect Manipulation
+                    </button>
+                </div>
+                <div id="image-result" class="result-box" style="display:none;"></div>
+            </div>
+        </div>
+
+        <!-- ── Video Panel ─────────────────────────────────────── -->
+        <div id="panel-video" class="panel">
+            <div class="card">
+                <h2>🎬 Video Analysis</h2>
+                <p style="color:var(--text-secondary); margin-bottom:1rem; font-size:0.9rem;">
+                    Upload a video to analyse frames for AI-generation signals and deepfake detection.
+                </p>
+                <div class="file-upload" id="video-dropzone">
+                    <div class="icon">🎬</div>
+                    <div class="label">Drop video or click to browse</div>
+                    <div class="filename" id="video-filename"></div>
+                    <input type="file" id="video-file" accept="video/*" onchange="handleVideoFile(this)">
+                </div>
+                <div class="actions">
+                    <button class="btn btn-primary" id="btn-detect-video" onclick="detectVideo()" disabled>
+                        🔍 Analyse Video
+                    </button>
+                </div>
+                <div id="video-result" class="result-box" style="display:none;"></div>
+            </div>
+        </div>
+
+        <!-- ── Feature Overview ─────────────────────────────────── -->
+        <div class="card">
+            <h2>Features</h2>
+            <div class="features-grid">
+                <div class="feature-item">
+                    <div class="icon">🤖</div>
+                    <div class="name">AI Content Detection<br><small>SEA-LION GUARD</small></div>
+                </div>
+                <div class="feature-item">
+                    <div class="icon">📰</div>
+                    <div class="name">Misinformation Check<br><small>Gemini + Groq</small></div>
+                </div>
+                <div class="feature-item">
+                    <div class="icon">🎙️</div>
+                    <div class="name">Voice Analysis<br><small>Gemini Live API</small></div>
+                </div>
+                <div class="feature-item">
+                    <div class="icon">🌏</div>
+                    <div class="name">Multilingual<br><small>EN · ZH · MS · TA</small></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ── Tab Navigation ─────────────────────────────────────
+        document.querySelectorAll('.tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+                document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+                tab.classList.add('active');
+                document.getElementById('panel-' + tab.dataset.panel).classList.add('active');
+            });
+        });
+
+        // ── Helpers ────────────────────────────────────────────
+        function showResult(id, data, isError) {
+            const el = document.getElementById(id);
+            el.style.display = 'block';
+            el.className = 'result-box ' + (isError ? 'error' : 'success');
+            el.textContent = typeof data === 'string' ? data : JSON.stringify(data, null, 2);
+        }
+
+        function showLoading(id) {
+            const el = document.getElementById(id);
+            el.style.display = 'block';
+            el.className = 'result-box';
+            el.innerHTML = '<span class="loading"><span class="spinner"></span> Analysing...</span>';
+        }
+
+        // ── Text Analysis ──────────────────────────────────────
+        async function analyseText() {
+            const text = document.getElementById('text-input').value.trim();
+            if (!text) return alert('Please enter text to analyse.');
+
+            const btn = document.getElementById('btn-analyse-text');
+            btn.disabled = true;
+            showLoading('text-result');
+
+            try {
+                const form = new FormData();
+                form.append('text', text);
+                const res = await fetch('/analyse', { method: 'POST', body: form });
+                const data = await res.json();
+                showResult('text-result', data, !res.ok);
+            } catch (e) {
+                showResult('text-result', 'Error: ' + e.message, true);
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        async function detectMisinfo() {
+            const text = document.getElementById('text-input').value.trim();
+            if (!text) return alert('Please enter text to check.');
+
+            const btn = document.getElementById('btn-detect-misinfo');
+            btn.disabled = true;
+            showLoading('text-result');
+
+            try {
+                const form = new FormData();
+                form.append('text', text);
+                const res = await fetch('/detect-misinformation', { method: 'POST', body: form });
+                const data = await res.json();
+                showResult('text-result', data, !res.ok);
+            } catch (e) {
+                showResult('text-result', 'Error: ' + e.message, true);
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        // ── Voice Recording (Gemini Live API) ──────────────────
+        let mediaRecorder = null;
+        let audioChunks = [];
+        let isRecording = false;
+        let audioContext = null;
+        let analyserNode = null;
+        let animFrameId = null;
+
+        // Create visualizer bars
+        const vizContainer = document.getElementById('visualizer');
+        const NUM_BARS = 20;
+        for (let i = 0; i < NUM_BARS; i++) {
+            const bar = document.createElement('div');
+            bar.className = 'viz-bar';
+            bar.style.height = '4px';
+            vizContainer.appendChild(bar);
+        }
+
+        function updateVisualizer() {
+            if (!analyserNode) return;
+            const data = new Uint8Array(analyserNode.frequencyBinCount);
+            analyserNode.getByteFrequencyData(data);
+
+            const bars = vizContainer.querySelectorAll('.viz-bar');
+            const step = Math.floor(data.length / NUM_BARS);
+            bars.forEach((bar, i) => {
+                const val = data[i * step] || 0;
+                bar.style.height = Math.max(4, (val / 255) * 50) + 'px';
+            });
+
+            animFrameId = requestAnimationFrame(updateVisualizer);
+        }
+
+        async function toggleRecording() {
+            if (isRecording) {
+                stopRecording();
+            } else {
+                await startRecording();
+            }
+        }
+
+        async function startRecording() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+                // Audio visualizer
+                audioContext = new AudioContext();
+                const source = audioContext.createMediaStreamSource(stream);
+                analyserNode = audioContext.createAnalyser();
+                analyserNode.fftSize = 256;
+                source.connect(analyserNode);
+                updateVisualizer();
+                vizContainer.classList.add('recording');
+
+                // Recorder
+                mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm;codecs=opus' });
+                audioChunks = [];
+
+                mediaRecorder.ondataavailable = (e) => {
+                    if (e.data.size > 0) audioChunks.push(e.data);
+                };
+
+                mediaRecorder.onstop = async () => {
+                    cancelAnimationFrame(animFrameId);
+                    vizContainer.classList.remove('recording');
+                    vizContainer.querySelectorAll('.viz-bar').forEach(b => b.style.height = '4px');
+
+                    stream.getTracks().forEach(t => t.stop());
+                    if (audioContext) { audioContext.close(); audioContext = null; }
+
+                    const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+                    await sendAudioToLiveAPI(audioBlob);
+                };
+
+                mediaRecorder.start(250); // Collect chunks every 250ms
+                isRecording = true;
+
+                const micBtn = document.getElementById('mic-btn');
+                micBtn.classList.add('recording');
+                micBtn.textContent = '⏹️';
+                document.getElementById('voice-status').className = 'voice-status recording';
+                document.getElementById('voice-status').textContent = '🔴 Recording... Click to stop';
+                document.getElementById('audio-response').style.display = 'none';
+
+            } catch (e) {
+                alert('Microphone access denied. Please allow microphone access.');
+                console.error('Mic error:', e);
+            }
+        }
+
+        function stopRecording() {
+            if (mediaRecorder && mediaRecorder.state === 'recording') {
+                mediaRecorder.stop();
+            }
+            isRecording = false;
+
+            const micBtn = document.getElementById('mic-btn');
+            micBtn.classList.remove('recording');
+            micBtn.classList.add('processing');
+            micBtn.textContent = '⏳';
+            document.getElementById('voice-status').className = 'voice-status processing';
+            document.getElementById('voice-status').textContent = '⏳ Processing with Gemini Live API...';
+        }
+
+        async function sendAudioToLiveAPI(audioBlob) {
+            const micBtn = document.getElementById('mic-btn');
+            const statusEl = document.getElementById('voice-status');
+
+            try {
+                // Use WebSocket for real-time communication
+                const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+                const ws = new WebSocket(`${protocol}//${location.host}/ws/live-audio`);
+
+                ws.onopen = () => {
+                    // Send audio as binary
+                    audioBlob.arrayBuffer().then(buffer => {
+                        ws.send(new Uint8Array(buffer));
+                        ws.send('END');
+                    });
+                };
+
+                ws.onmessage = (event) => {
+                    if (event.data === 'DONE') {
+                        ws.close();
+                        return;
+                    }
+                    try {
+                        const data = JSON.parse(event.data);
+                        if (data.success && data.audio) {
+                            // Play response audio
+                            const audioBytes = Uint8Array.from(atob(data.audio), c => c.charCodeAt(0));
+                            const blob = new Blob([audioBytes], { type: 'audio/ogg' });
+                            const url = URL.createObjectURL(blob);
+
+                            const audioEl = document.getElementById('response-audio');
+                            audioEl.src = url;
+                            document.getElementById('audio-response').style.display = 'block';
+                            audioEl.play().catch(() => {});
+
+                            statusEl.className = 'voice-status';
+                            statusEl.textContent = '✅ Response received — click to record again';
+                            showResult('voice-result', 'Gemini Live API response received successfully.', false);
+                        } else {
+                            statusEl.className = 'voice-status';
+                            statusEl.textContent = '⚠️ No audio response — try again';
+                            showResult('voice-result', data.error || 'No audio returned', true);
+                        }
+                    } catch (e) {
+                        console.error('WS parse error:', e);
+                    }
+                };
+
+                ws.onerror = (e) => {
+                    console.error('WS error:', e);
+                    // Fallback to REST endpoint
+                    fallbackToREST(audioBlob);
+                };
+
+                ws.onclose = () => {
+                    micBtn.classList.remove('processing');
+                    micBtn.textContent = '🎙️';
+                };
+
+            } catch (e) {
+                fallbackToREST(audioBlob);
+            }
+        }
+
+        async function fallbackToREST(audioBlob) {
+            const micBtn = document.getElementById('mic-btn');
+            const statusEl = document.getElementById('voice-status');
+
+            try {
+                const form = new FormData();
+                form.append('file', audioBlob, 'recording.webm');
+                const res = await fetch('/analyse-audio', { method: 'POST', body: form });
+                const data = await res.json();
+
+                if (data.success && data.audio) {
+                    const audioBytes = Uint8Array.from(atob(data.audio), c => c.charCodeAt(0));
+                    const blob = new Blob([audioBytes], { type: 'audio/ogg' });
+                    const url = URL.createObjectURL(blob);
+
+                    const audioEl = document.getElementById('response-audio');
+                    audioEl.src = url;
+                    document.getElementById('audio-response').style.display = 'block';
+                    audioEl.play().catch(() => {});
+
+                    statusEl.className = 'voice-status';
+                    statusEl.textContent = '✅ Response received — click to record again';
+                } else {
+                    statusEl.className = 'voice-status';
+                    statusEl.textContent = '⚠️ No audio response — try again';
+                    showResult('voice-result', data.error || 'No audio returned', true);
+                }
+            } catch (e) {
+                statusEl.className = 'voice-status';
+                statusEl.textContent = '❌ Error — try again';
+                showResult('voice-result', 'Error: ' + e.message, true);
+            } finally {
+                micBtn.classList.remove('processing');
+                micBtn.textContent = '🎙️';
+            }
+        }
+
+        // ── Audio File Upload ──────────────────────────────────
+        function handleAudioFile(input) {
+            if (input.files.length > 0) {
+                document.getElementById('audio-filename').textContent = input.files[0].name;
+                document.getElementById('btn-upload-audio').disabled = false;
+            }
+        }
+
+        async function uploadAudio() {
+            const file = document.getElementById('audio-file').files[0];
+            if (!file) return;
+
+            const btn = document.getElementById('btn-upload-audio');
+            btn.disabled = true;
+            showLoading('upload-audio-result');
+
+            try {
+                const form = new FormData();
+                form.append('file', file);
+                const res = await fetch('/analyse-audio', { method: 'POST', body: form });
+                const data = await res.json();
+
+                if (data.success && data.audio) {
+                    const audioBytes = Uint8Array.from(atob(data.audio), c => c.charCodeAt(0));
+                    const blob = new Blob([audioBytes], { type: 'audio/ogg' });
+                    const url = URL.createObjectURL(blob);
+
+                    const audioEl = document.getElementById('upload-response-audio');
+                    audioEl.src = url;
+                    document.getElementById('upload-audio-response').style.display = 'block';
+                    audioEl.play().catch(() => {});
+                    showResult('upload-audio-result', 'Audio analysis complete — response playing above.', false);
+                } else {
+                    showResult('upload-audio-result', data.error || 'No audio returned', true);
+                }
+            } catch (e) {
+                showResult('upload-audio-result', 'Error: ' + e.message, true);
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        // ── Image Analysis ─────────────────────────────────────
+        function handleImageFile(input) {
+            if (input.files.length > 0) {
+                const file = input.files[0];
+                document.getElementById('image-filename').textContent = file.name;
+                document.getElementById('btn-detect-image').disabled = false;
+                document.getElementById('btn-detect-manip').disabled = false;
+
+                // Preview
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    document.getElementById('preview-img').src = e.target.result;
+                    document.getElementById('image-preview').style.display = 'block';
+                };
+                reader.readAsDataURL(file);
+            }
+        }
+
+        async function detectImage() {
+            const file = document.getElementById('image-file').files[0];
+            if (!file) return;
+
+            const btn = document.getElementById('btn-detect-image');
+            btn.disabled = true;
+            showLoading('image-result');
+
+            try {
+                const form = new FormData();
+                form.append('file', file);
+                const res = await fetch('/detect-image', { method: 'POST', body: form });
+                const data = await res.json();
+                showResult('image-result', data, !res.ok);
+            } catch (e) {
+                showResult('image-result', 'Error: ' + e.message, true);
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        async function detectManipulation() {
+            const file = document.getElementById('image-file').files[0];
+            if (!file) return;
+
+            const btn = document.getElementById('btn-detect-manip');
+            btn.disabled = true;
+            showLoading('image-result');
+
+            try {
+                const form = new FormData();
+                form.append('file', file);
+                const res = await fetch('/detect-image-manipulation', { method: 'POST', body: form });
+                const data = await res.json();
+                showResult('image-result', data, !res.ok);
+            } catch (e) {
+                showResult('image-result', 'Error: ' + e.message, true);
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        // ── Video Analysis ─────────────────────────────────────
+        function handleVideoFile(input) {
+            if (input.files.length > 0) {
+                document.getElementById('video-filename').textContent = input.files[0].name;
+                document.getElementById('btn-detect-video').disabled = false;
+            }
+        }
+
+        async function detectVideo() {
+            const file = document.getElementById('video-file').files[0];
+            if (!file) return;
+
+            const btn = document.getElementById('btn-detect-video');
+            btn.disabled = true;
+            showLoading('video-result');
+
+            try {
+                const form = new FormData();
+                form.append('file', file);
+                const res = await fetch('/detect-video', { method: 'POST', body: form });
+                const data = await res.json();
+                showResult('video-result', data, !res.ok);
+            } catch (e) {
+                showResult('video-result', 'Error: ' + e.message, true);
+            } finally {
+                btn.disabled = false;
+            }
+        }
+    </script>
+</body>
+</html>
