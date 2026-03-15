@@ -85,6 +85,86 @@ def test_full_analysis_endpoint(client):
 
 
 # ---------------------------------------------------------------------------
+# SSE Streaming Pipeline (ContextGuard pattern)
+# ---------------------------------------------------------------------------
+
+def test_analyse_stream_returns_sse_events(client):
+    """POST /analyse-stream returns SSE events for pipeline steps."""
+    guard_result = {"is_safe": True, "label": "safe", "raw_response": {}, "safety_flag": None}
+    misinfo_result = {"misinformation_detected": False, "misinformation_type": "none", "claims": [], "explanation": "Clean"}
+    insights_result = {"explanation": "No issues", "is_harmful": False, "llm_used": "gemini"}
+
+    with patch("app.run_guard_detection", new_callable=AsyncMock, return_value=guard_result), \
+         patch("app.detect_misinformation", new_callable=AsyncMock, return_value=misinfo_result), \
+         patch("app.run_insights", new_callable=AsyncMock, return_value=insights_result):
+        res = client.post(
+            "/analyse-stream",
+            json={"text": "Test content for streaming analysis"},
+        )
+
+    assert res.status_code == 200
+    assert "text/event-stream" in res.headers["content-type"]
+    body = res.text
+
+    # Verify SSE events are present
+    assert "event: step" in body
+    assert "event: result" in body
+    assert '"id": "guard"' in body
+    assert '"id": "misinfo"' in body
+    assert '"id": "insights"' in body
+    assert '"status": "running"' in body
+    assert '"status": "done"' in body
+    assert '"is_safe": true' in body
+
+
+def test_analyse_stream_handles_guard_failure(client):
+    """SSE endpoint handles GUARD failure gracefully."""
+    misinfo_result = {"misinformation_detected": False, "misinformation_type": "none", "claims": [], "explanation": "Clean"}
+    insights_result = {"explanation": "N/A", "is_harmful": False}
+
+    with patch("app.run_guard_detection", new_callable=AsyncMock, side_effect=Exception("GUARD down")), \
+         patch("app.detect_misinformation", new_callable=AsyncMock, return_value=misinfo_result), \
+         patch("app.run_insights", new_callable=AsyncMock, return_value=insights_result):
+        res = client.post(
+            "/analyse-stream",
+            json={"text": "Test content"},
+        )
+
+    assert res.status_code == 200
+    body = res.text
+    # GUARD should fail but pipeline should continue
+    assert "event: result" in body
+    assert '"is_safe": null' in body
+
+
+def test_analyse_stream_empty_text_returns_400(client):
+    """SSE endpoint rejects empty text."""
+    res = client.post("/analyse-stream", json={"text": ""})
+    assert res.status_code == 400
+    data = res.json()
+    assert "error" in data
+
+
+def test_analyse_stream_unsafe_content(client):
+    """SSE endpoint detects unsafe content correctly."""
+    guard_result = {"is_safe": False, "label": "unsafe", "raw_response": {}, "safety_flag": "hate_speech"}
+    misinfo_result = {"misinformation_detected": True, "misinformation_type": "fabricated_quote", "claims": ["false claim"], "explanation": "Contains fabrication"}
+    insights_result = {"explanation": "Issues found", "is_harmful": True, "llm_used": "gemini"}
+
+    with patch("app.run_guard_detection", new_callable=AsyncMock, return_value=guard_result), \
+         patch("app.detect_misinformation", new_callable=AsyncMock, return_value=misinfo_result), \
+         patch("app.run_insights", new_callable=AsyncMock, return_value=insights_result):
+        res = client.post(
+            "/analyse-stream",
+            json={"text": "Harmful content here"},
+        )
+
+    assert res.status_code == 200
+    body = res.text
+    assert '"is_safe": false' in body
+
+
+# ---------------------------------------------------------------------------
 # Audio / Gemini Live API
 # ---------------------------------------------------------------------------
 
