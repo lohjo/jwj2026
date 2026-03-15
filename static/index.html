@@ -528,6 +528,17 @@
             }
         }
 
+        // ── Helpers ────────────────────────────────────────────
+        function playBase64Audio(base64String, audioElementId) {
+            const audioBytes = Uint8Array.from(atob(base64String), c => c.charCodeAt(0));
+            const blob = new Blob([audioBytes], { type: 'audio/ogg' });
+            const url = URL.createObjectURL(blob);
+            const audioEl = document.getElementById(audioElementId);
+            audioEl.src = url;
+            audioEl.play().catch(err => console.warn('Autoplay blocked:', err.message));
+            return url;
+        }
+
         // ── Voice Recording (Gemini Live API) ──────────────────
         let mediaRecorder = null;
         let audioChunks = [];
@@ -582,8 +593,16 @@
                 updateVisualizer();
                 vizContainer.classList.add('recording');
 
-                // Recorder
-                mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm;codecs=opus' });
+                // Recorder — use WebM if supported, fall back to mp4 for Safari
+                let recorderMime = 'audio/webm;codecs=opus';
+                if (!MediaRecorder.isTypeSupported(recorderMime)) {
+                    recorderMime = 'audio/mp4';
+                    if (!MediaRecorder.isTypeSupported(recorderMime)) {
+                        recorderMime = '';  // Let browser choose default
+                    }
+                }
+                const recorderOpts = recorderMime ? { mimeType: recorderMime } : {};
+                mediaRecorder = new MediaRecorder(stream, recorderOpts);
                 audioChunks = [];
 
                 mediaRecorder.ondataavailable = (e) => {
@@ -657,15 +676,8 @@
                     try {
                         const data = JSON.parse(event.data);
                         if (data.success && data.audio) {
-                            // Play response audio
-                            const audioBytes = Uint8Array.from(atob(data.audio), c => c.charCodeAt(0));
-                            const blob = new Blob([audioBytes], { type: 'audio/ogg' });
-                            const url = URL.createObjectURL(blob);
-
-                            const audioEl = document.getElementById('response-audio');
-                            audioEl.src = url;
+                            playBase64Audio(data.audio, 'response-audio');
                             document.getElementById('audio-response').style.display = 'block';
-                            audioEl.play().catch(() => {});
 
                             statusEl.className = 'voice-status';
                             statusEl.textContent = '✅ Response received — click to record again';
@@ -707,14 +719,8 @@
                 const data = await res.json();
 
                 if (data.success && data.audio) {
-                    const audioBytes = Uint8Array.from(atob(data.audio), c => c.charCodeAt(0));
-                    const blob = new Blob([audioBytes], { type: 'audio/ogg' });
-                    const url = URL.createObjectURL(blob);
-
-                    const audioEl = document.getElementById('response-audio');
-                    audioEl.src = url;
+                    playBase64Audio(data.audio, 'response-audio');
                     document.getElementById('audio-response').style.display = 'block';
-                    audioEl.play().catch(() => {});
 
                     statusEl.className = 'voice-status';
                     statusEl.textContent = '✅ Response received — click to record again';
@@ -756,14 +762,8 @@
                 const data = await res.json();
 
                 if (data.success && data.audio) {
-                    const audioBytes = Uint8Array.from(atob(data.audio), c => c.charCodeAt(0));
-                    const blob = new Blob([audioBytes], { type: 'audio/ogg' });
-                    const url = URL.createObjectURL(blob);
-
-                    const audioEl = document.getElementById('upload-response-audio');
-                    audioEl.src = url;
+                    playBase64Audio(data.audio, 'upload-response-audio');
                     document.getElementById('upload-audio-response').style.display = 'block';
-                    audioEl.play().catch(() => {});
                     showResult('upload-audio-result', 'Audio analysis complete — response playing above.', false);
                 } else {
                     showResult('upload-audio-result', data.error || 'No audio returned', true);
