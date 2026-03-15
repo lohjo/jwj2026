@@ -1,0 +1,37 @@
+# Secrets — never sent to Cloud Build
+.env
+*.key
+*.pem
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Python bytecode
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Local artefacts (downloads, generated frames, TTS files)
+downloads/
+uploads/
+frames/
+research/raw/
+
+# Dev tooling
+.git/
+.github/
+.vscode/
+.claude/
+tests/
+
+# Docs (keep README.md)
+markdowns/
+*.md
+!README.md
+
+# Misc
+*.log
+.DS_Store

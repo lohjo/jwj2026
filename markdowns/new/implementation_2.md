@@ -134,7 +134,7 @@ SENTINEL currently fails three critical hackathon requirements: no Live API (Web
 **Step 1.2: Add `pydub` dependency** — requirements.txt
 - Add `pydub>=0.25.1` (needed for PCM16→OGG conversion). `google-genai` already present.
 
-**Step 1.3: Implement live.py** — live.py *(currently empty)*
+**Step 1.3: Implement live.py** — live.py *(done)*
 - `async def live_voice_exchange(audio_bytes, mime_type, system_context) -> bytes` — main function
 - `def _pcm_to_ogg(pcm_bytes, sample_rate) -> bytes` — converter helper
 - Uses `genai.Client(api_key=GEMINI_API_KEY).aio.live.connect()` WebSocket (not REST)

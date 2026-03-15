@@ -8,6 +8,8 @@ import asyncio
 import logging
 import os
 import sys
+import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 
 from telegram import Update
@@ -669,6 +671,27 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                 pass
 
 
+# ── Cloud Run health check server ─────────────────────────────────────
+
+class _HealthHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"OK")
+
+    def log_message(self, format, *args):
+        pass  # suppress access logs
+
+
+def _start_health_server():
+    """Start a minimal HTTP server on PORT for Cloud Run health checks."""
+    port = int(os.environ.get("PORT", "8080"))
+    server = HTTPServer(("0.0.0.0", port), _HealthHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    logger.info("Health check server listening on port %d", port)
+
+
 # ── Bot startup ───────────────────────────────────────────────────────
 
 def start_bot():
@@ -676,6 +699,9 @@ def start_bot():
     if not TELEGRAM_TOKEN:
         logger.error("TELEGRAM_TOKEN not set — cannot start bot")
         sys.exit(1)
+
+    # Cloud Run requires a listening port for health checks
+    _start_health_server()
 
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
     app.add_handler(CommandHandler("start", start_command))
@@ -688,7 +714,7 @@ def start_bot():
     app.add_handler(MessageHandler(filters.VIDEO | filters.VIDEO_NOTE, handle_video))
 
     logger.info("Starting Telegram bot polling...")
-    app.run_polling()
+    app.run_polling(bootstrap_retries=5)
 
 
 if __name__ == "__main__":

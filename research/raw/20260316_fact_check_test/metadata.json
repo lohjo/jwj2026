@@ -1,0 +1,37 @@
+[
+  {
+    "index": 1,
+    "url": "https://library.csi.cuny.edu/misinformation/fact-checking-websites",
+    "domain": "library.csi.cuny.edu",
+    "word_count": 931,
+    "fetched_at": "2026-03-16T00:14:53.872879"
+  },
+  {
+    "index": 2,
+    "url": "https://www.internetmatters.org/issues/fake-news-and-misinformation-advice-hub/find-the-fake/",
+    "domain": "www.internetmatters.org",
+    "word_count": 968,
+    "fetched_at": "2026-03-16T00:14:53.873466"
+  },
+  {
+    "index": 3,
+    "url": "https://newsinitiative.withgoogle.com/resources/trainings/google-fact-check-tools/",
+    "domain": "newsinitiative.withgoogle.com",
+    "word_count": 1908,
+    "fetched_at": "2026-03-16T00:14:53.874223"
+  },
+  {
+    "index": 4,
+    "url": "https://toolbox.google.com/factcheck",
+    "domain": "toolbox.google.com",
+    "word_count": 1228,
+    "fetched_at": "2026-03-16T00:14:53.874641"
+  },
+  {
+    "index": 5,
+    "url": "https://guides.lib.berkeley.edu/c.php?g=620677&p=4333407",
+    "domain": "guides.lib.berkeley.edu",
+    "word_count": 331,
+    "fetched_at": "2026-03-16T00:14:53.875046"
+  }
+]

@@ -17,6 +17,7 @@ claude-code-sdk>=0.0.25
 deepgram-sdk>=3.5
 elevenlabs>=1.0
 pydub>=0.25
+audioop-lts>=0.2.1; python_version >= "3.13"
 
 # Image / Video
 Pillow>=10.0

@@ -53,6 +53,12 @@ async def live_voice_exchange(
     try:
         client = genai.Client(api_key=GEMINI_API_KEY)
 
+        # Convert input audio to PCM16 mono 16kHz — the only format Live API accepts
+        pcm_input = _to_pcm(audio_bytes, mime_type)
+        if not pcm_input:
+            logger.warning("[Live API] Could not convert input audio to PCM")
+            return b""
+
         config = types.LiveConnectConfig(
             response_modalities=["AUDIO"],
             speech_config=types.SpeechConfig(
@@ -78,12 +84,15 @@ async def live_voice_exchange(
             model=GEMINI_LIVE_MODEL,
             config=config,
         ) as session:
-            await session.send(
-                input=types.LiveClientRealtimeInput(
-                    media_chunks=[types.Blob(data=audio_bytes, mime_type=mime_type)]
-                )
+            await session.send_realtime_input(
+                audio=types.Blob(data=pcm_input, mime_type="audio/pcm;rate=16000")
             )
-            await session.send(input=".", end_of_turn=True)
+            await session.send_client_content(
+                turns=types.Content(
+                    parts=[types.Part(text=".")]
+                ),
+                turn_complete=True,
+            )
 
             pcm_audio = b""
             async for message in session.receive():
@@ -120,4 +129,25 @@ def _pcm_to_ogg(pcm_bytes: bytes, sample_rate: int = 24000) -> bytes:
         return buf.getvalue()
     except Exception as e:
         logger.error("[Live API] PCM→OGG conversion failed: %s", e)
+        return b""
+
+
+def _to_pcm(audio_bytes: bytes, mime_type: str) -> bytes:
+    """Convert any input audio format to PCM16 mono 16kHz for the Live API."""
+    try:
+        from pydub import AudioSegment
+
+        fmt_map = {
+            "audio/ogg": "ogg",
+            "audio/mp4": "mp4",
+            "audio/mpeg": "mp3",
+            "audio/wav": "wav",
+            "audio/webm": "webm",
+        }
+        fmt = fmt_map.get(mime_type, "ogg")
+        audio = AudioSegment.from_file(io.BytesIO(audio_bytes), format=fmt)
+        audio = audio.set_frame_rate(16000).set_channels(1).set_sample_width(2)
+        return audio.raw_data
+    except Exception as e:
+        logger.error("[Live API] Input audio conversion failed: %s", e)
         return b""

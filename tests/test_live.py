@@ -50,7 +50,8 @@ async def test_live_voice_exchange_returns_bytes_on_success():
 
     session = _make_mock_session(pcm_data)
 
-    with patch("media.live.genai.Client") as mock_client_cls:
+    with patch("media.live.genai.Client") as mock_client_cls, \
+         patch("media.live._to_pcm", return_value=b"\x00\x00" * 1600):
         mock_client_cls.return_value.aio.live.connect.return_value = session
 
         result = await live_voice_exchange(b"fake_audio_bytes")
@@ -64,7 +65,8 @@ async def test_live_voice_exchange_passes_system_context():
     """system_context is injected into the Live API system instruction."""
     session = _make_mock_session(b"\x00\x01" * 100)
 
-    with patch("media.live.genai.Client") as mock_client_cls:
+    with patch("media.live.genai.Client") as mock_client_cls, \
+         patch("media.live._to_pcm", return_value=b"\x00\x00" * 1600):
         mock_client_cls.return_value.aio.live.connect.return_value = session
 
         await live_voice_exchange(

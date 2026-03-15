@@ -43,7 +43,7 @@ TRANSLATOR_MODEL = _optional("TRANSLATOR_MODEL", "aisingapore/Gemma-SEA-LION-v4-
 # ── Primary LLM: Gemini ─────────────────────────────────────────────────
 GEMINI_API_KEY = _require("GEMINI_API_KEY")
 GEMINI_MODEL = _optional("GEMINI_MODEL", "gemini-2.5-flash")
-GEMINI_LIVE_MODEL = _optional("GEMINI_LIVE_MODEL", "gemini-2.0-flash-live-001")
+GEMINI_LIVE_MODEL = _optional("GEMINI_LIVE_MODEL", "gemini-2.5-flash-native-audio-latest")
 GEMINI_LIVE_VOICE = _optional("GEMINI_LIVE_VOICE", "Aoede")
 
 # ── Fallback LLM: Groq ──────────────────────────────────────────────────
