@@ -5,150 +5,270 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SENTINEL — AI Content Detection</title>
     <style>
+        /* ── ContextGuard-inspired design tokens ────────────────────── */
         :root {
-            --bg-primary: #0f172a;
-            --bg-secondary: #1e293b;
-            --bg-card: #1e293b;
-            --bg-input: #334155;
-            --text-primary: #f1f5f9;
-            --text-secondary: #94a3b8;
-            --text-muted: #64748b;
+            --bg-primary: #0a0b0f;
+            --bg-secondary: #141519;
+            --bg-card: rgba(255, 255, 255, 0.025);
+            --bg-card-hover: rgba(255, 255, 255, 0.05);
+            --bg-input: rgba(0, 0, 0, 0.3);
+            --text-primary: #e2e4ea;
+            --text-secondary: rgba(255, 255, 255, 0.55);
+            --text-tertiary: rgba(255, 255, 255, 0.35);
+            --text-muted: rgba(255, 255, 255, 0.25);
             --accent: #3b82f6;
             --accent-hover: #2563eb;
             --success: #22c55e;
             --warning: #f59e0b;
             --danger: #ef4444;
-            --border: #334155;
+            --border: rgba(255, 255, 255, 0.06);
+            --border-active: rgba(255, 255, 255, 0.1);
             --radius: 12px;
+            --risk-critical: #ef4444;
+            --risk-high: #f59e0b;
+            --risk-medium: #3b82f6;
+            --risk-low: #22c55e;
         }
 
         * { margin: 0; padding: 0; box-sizing: border-box; }
 
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            font-family: 'Source Sans 3', 'Segoe UI', system-ui, sans-serif;
             background: var(--bg-primary);
             color: var(--text-primary);
             min-height: 100vh;
         }
 
+        /* Dot grid background (ContextGuard pattern) */
+        body::before {
+            content: "";
+            position: fixed;
+            inset: 0;
+            background-image: radial-gradient(rgba(255, 255, 255, 0.015) 1px, transparent 1px);
+            background-size: 32px 32px;
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        ::selection { background: rgba(59, 130, 246, 0.3); }
+
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        @keyframes fadeInUp {
+            from { opacity: 0; transform: translateY(16px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        @keyframes micPulse {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); }
+            50% { box-shadow: 0 0 0 20px rgba(239, 68, 68, 0); }
+        }
+
+        .container {
+            max-width: 960px;
+            margin: 0 auto;
+            padding: 2rem 1.25rem;
+            position: relative;
+            z-index: 1;
+        }
+
+        /* ── Header ────────────────────────────────────────────────── */
         .header {
-            background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
-            border-bottom: 1px solid var(--border);
-            padding: 1.5rem 2rem;
-            text-align: center;
+            margin-bottom: 2.5rem;
+        }
+
+        .header .status {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            margin-bottom: 0.375rem;
+        }
+
+        .header .status-dot {
+            width: 10px; height: 10px;
+            border-radius: 50%;
+            background: var(--success);
+            box-shadow: 0 0 10px rgba(34, 197, 94, 0.5);
+        }
+
+        .header .status-label {
+            font-family: 'JetBrains Mono', 'Fira Code', monospace;
+            font-size: 11px;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+            color: var(--text-tertiary);
         }
 
         .header h1 {
-            font-size: 1.75rem;
-            font-weight: 700;
-            background: linear-gradient(135deg, #3b82f6, #8b5cf6);
+            font-size: 36px;
+            font-weight: 900;
+            letter-spacing: -0.02em;
+            background: linear-gradient(135deg, #e2e4ea 0%, #8b8fa3 100%);
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
             margin-bottom: 0.25rem;
         }
 
         .header p {
-            color: var(--text-secondary);
-            font-size: 0.9rem;
+            font-size: 14px;
+            letter-spacing: 0.02em;
+            color: var(--text-tertiary);
         }
 
-        .container {
-            max-width: 1100px;
-            margin: 0 auto;
-            padding: 1.5rem;
-        }
-
+        /* ── Tabs ──────────────────────────────────────────────────── */
         .tabs {
             display: flex;
-            gap: 0.5rem;
+            gap: 0.25rem;
             margin-bottom: 1.5rem;
             flex-wrap: wrap;
         }
 
         .tab {
-            padding: 0.75rem 1.25rem;
-            border-radius: var(--radius);
-            background: var(--bg-secondary);
+            padding: 8px 18px;
+            border-radius: 8px;
+            background: transparent;
             border: 1px solid var(--border);
-            color: var(--text-secondary);
+            color: var(--text-tertiary);
             cursor: pointer;
-            font-size: 0.9rem;
-            font-weight: 500;
+            font-size: 13px;
+            font-weight: 600;
             transition: all 0.2s;
+            font-family: 'JetBrains Mono', 'Fira Code', monospace;
+            letter-spacing: 0.04em;
         }
 
-        .tab:hover { border-color: var(--accent); color: var(--text-primary); }
-        .tab.active { background: var(--accent); color: white; border-color: var(--accent); }
+        .tab:hover { border-color: var(--border-active); color: var(--text-secondary); }
+
+        .tab.active {
+            background: rgba(239, 68, 68, 0.1);
+            color: var(--danger);
+            border-color: rgba(239, 68, 68, 0.3);
+        }
 
         .panel { display: none; }
-        .panel.active { display: block; }
+        .panel.active { display: block; animation: fadeIn 0.4s ease; }
 
+        /* ── Cards ─────────────────────────────────────────────────── */
         .card {
             background: var(--bg-card);
             border: 1px solid var(--border);
             border-radius: var(--radius);
             padding: 1.5rem;
-            margin-bottom: 1.5rem;
+            margin-bottom: 1.25rem;
+            transition: all 0.3s ease;
+        }
+
+        .card:hover {
+            background: var(--bg-card-hover);
+            border-color: var(--border-active);
         }
 
         .card h2 {
-            font-size: 1.1rem;
+            font-size: 13px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--text-tertiary);
             margin-bottom: 1rem;
-            color: var(--text-primary);
+            font-family: 'JetBrains Mono', 'Fira Code', monospace;
         }
 
+        .card-desc {
+            color: var(--text-secondary);
+            font-size: 13px;
+            margin-bottom: 1rem;
+            line-height: 1.6;
+        }
+
+        /* ── Text Input ────────────────────────────────────────────── */
         textarea, input[type="text"] {
             width: 100%;
             background: var(--bg-input);
-            border: 1px solid var(--border);
+            border: 1px solid rgba(255, 255, 255, 0.08);
             border-radius: 8px;
-            padding: 0.75rem 1rem;
-            color: var(--text-primary);
-            font-size: 0.95rem;
+            padding: 1rem;
+            color: #c8cad2;
+            font-family: 'JetBrains Mono', 'Fira Code', monospace;
+            font-size: 13px;
+            line-height: 1.7;
             resize: vertical;
             outline: none;
-            transition: border-color 0.2s;
+            transition: border-color 0.2s, box-shadow 0.2s;
         }
 
         textarea:focus, input[type="text"]:focus {
-            border-color: var(--accent);
+            border-color: rgba(239, 68, 68, 0.3);
+            box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.08);
         }
 
-        textarea { min-height: 120px; }
+        textarea { min-height: 160px; }
 
+        .char-count {
+            font-family: 'JetBrains Mono', 'Fira Code', monospace;
+            font-size: 11px;
+            color: var(--text-muted);
+            text-align: right;
+            margin-top: 0.5rem;
+        }
+
+        /* ── Buttons ───────────────────────────────────────────────── */
         .btn {
             display: inline-flex;
             align-items: center;
             gap: 0.5rem;
-            padding: 0.75rem 1.5rem;
+            padding: 12px 28px;
             border-radius: 8px;
             border: none;
-            font-size: 0.9rem;
-            font-weight: 600;
+            font-size: 14px;
+            font-weight: 700;
+            letter-spacing: 0.03em;
             cursor: pointer;
             transition: all 0.2s;
         }
 
-        .btn-primary { background: var(--accent); color: white; }
-        .btn-primary:hover { background: var(--accent-hover); }
-        .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+        .btn-primary {
+            background: linear-gradient(135deg, #ef4444, #dc2626);
+            color: white;
+            box-shadow: 0 4px 24px rgba(239, 68, 68, 0.25);
+        }
 
-        .btn-danger { background: var(--danger); color: white; }
-        .btn-danger:hover { background: #dc2626; }
+        .btn-primary:hover { filter: brightness(1.1); }
+        .btn-primary:disabled { opacity: 0.4; cursor: not-allowed; filter: none; }
 
-        .btn-success { background: var(--success); color: white; }
+        .btn-secondary {
+            background: transparent;
+            color: var(--text-tertiary);
+            border: 1px solid var(--border);
+            padding: 10px 20px;
+            font-size: 13px;
+        }
 
+        .btn-secondary:hover { color: var(--text-secondary); border-color: var(--border-active); }
+
+        .actions { display: flex; gap: 0.75rem; margin-top: 1rem; flex-wrap: wrap; }
+
+        /* ── File Upload ───────────────────────────────────────────── */
         .file-upload {
-            border: 2px dashed var(--border);
+            border: 1px dashed rgba(255, 255, 255, 0.1);
             border-radius: var(--radius);
-            padding: 2rem;
+            padding: 2.5rem 2rem;
             text-align: center;
             cursor: pointer;
             transition: all 0.2s;
             position: relative;
+            background: var(--bg-input);
         }
 
-        .file-upload:hover { border-color: var(--accent); }
+        .file-upload:hover {
+            border-color: rgba(239, 68, 68, 0.4);
+            background: rgba(239, 68, 68, 0.03);
+        }
 
         .file-upload input[type="file"] {
             position: absolute;
@@ -157,46 +277,351 @@
             cursor: pointer;
         }
 
-        .file-upload .icon { font-size: 2rem; margin-bottom: 0.5rem; }
-        .file-upload .label { color: var(--text-secondary); font-size: 0.9rem; }
-        .file-upload .filename { color: var(--accent); font-size: 0.85rem; margin-top: 0.5rem; }
+        .file-upload .icon { font-size: 2rem; margin-bottom: 0.5rem; opacity: 0.4; }
+        .file-upload .label { color: var(--text-secondary); font-size: 14px; font-weight: 600; }
+        .file-upload .sublabel { color: var(--text-muted); font-size: 12px; margin-top: 0.25rem; }
+        .file-upload .filename { color: var(--accent); font-size: 12px; margin-top: 0.5rem; font-family: monospace; }
 
+        /* ── Processing Animation (ContextGuard pattern) ───────────── */
+        .processing-box {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 2rem;
+            animation: fadeIn 0.4s ease;
+        }
+
+        .processing-header {
+            display: flex;
+            align-items: center;
+            gap: 0.625rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .processing-header .dot {
+            width: 8px; height: 8px;
+            border-radius: 50%;
+            background: var(--danger);
+            animation: pulse 1s infinite;
+        }
+
+        .processing-header span {
+            font-family: 'JetBrains Mono', 'Fira Code', monospace;
+            font-size: 12px;
+            letter-spacing: 0.06em;
+            color: var(--danger);
+        }
+
+        .pipeline-step {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            padding: 10px 0;
+            transition: opacity 0.5s;
+        }
+
+        .pipeline-step.pending { opacity: 0.2; }
+        .pipeline-step.running { opacity: 1; }
+        .pipeline-step.done { opacity: 0.6; }
+
+        .pipeline-step .icon {
+            width: 28px;
+            text-align: center;
+            font-size: 14px;
+        }
+
+        .pipeline-step .label {
+            font-size: 13px;
+            color: var(--text-secondary);
+            flex: 1;
+        }
+
+        .pipeline-step.running .label { color: var(--text-primary); }
+        .pipeline-step.done .label { color: var(--text-secondary); }
+
+        .pipeline-step .status-text {
+            font-family: 'JetBrains Mono', 'Fira Code', monospace;
+            font-size: 10px;
+            color: var(--text-muted);
+        }
+
+        .step-dot-running {
+            display: inline-block;
+            width: 8px; height: 8px;
+            border-radius: 50%;
+            background: var(--danger);
+            animation: pulse 1s infinite;
+        }
+
+        /* ── Results (ContextGuard pattern) ─────────────────────────── */
+        .results-container { animation: fadeIn 0.5s ease; }
+
+        .verdict-card {
+            border-radius: var(--radius);
+            padding: 1.25rem 1.5rem;
+            margin-bottom: 1rem;
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .verdict-card.safe {
+            background: rgba(34, 197, 94, 0.08);
+            border: 1px solid rgba(34, 197, 94, 0.15);
+        }
+
+        .verdict-card.unsafe {
+            background: rgba(239, 68, 68, 0.08);
+            border: 1px solid rgba(239, 68, 68, 0.15);
+        }
+
+        .verdict-card.unknown {
+            background: rgba(245, 158, 11, 0.08);
+            border: 1px solid rgba(245, 158, 11, 0.15);
+        }
+
+        .verdict-icon { font-size: 28px; }
+
+        .verdict-text h3 {
+            font-size: 15px;
+            font-weight: 700;
+            margin-bottom: 0.25rem;
+        }
+
+        .verdict-card.safe .verdict-text h3 { color: var(--success); }
+        .verdict-card.unsafe .verdict-text h3 { color: var(--danger); }
+        .verdict-card.unknown .verdict-text h3 { color: var(--warning); }
+
+        .verdict-text p { font-size: 12px; color: var(--text-secondary); }
+
+        /* Risk badges */
+        .risk-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.375rem;
+            padding: 3px 10px;
+            border-radius: 999px;
+            font-family: 'JetBrains Mono', 'Fira Code', monospace;
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+        }
+
+        .risk-badge.safe {
+            background: rgba(34, 197, 94, 0.12);
+            color: var(--risk-low);
+            border: 1px solid rgba(34, 197, 94, 0.2);
+        }
+
+        .risk-badge.unsafe {
+            background: rgba(239, 68, 68, 0.12);
+            color: var(--risk-critical);
+            border: 1px solid rgba(239, 68, 68, 0.2);
+        }
+
+        .risk-badge.warning {
+            background: rgba(245, 158, 11, 0.12);
+            color: var(--risk-high);
+            border: 1px solid rgba(245, 158, 11, 0.2);
+        }
+
+        .risk-badge .badge-dot {
+            width: 6px; height: 6px;
+            border-radius: 50%;
+        }
+
+        .risk-badge.safe .badge-dot { background: var(--risk-low); }
+        .risk-badge.unsafe .badge-dot { background: var(--risk-critical); }
+        .risk-badge.warning .badge-dot { background: var(--risk-high); }
+
+        /* Detection detail cards */
+        .detail-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            margin-bottom: 0.75rem;
+            overflow: hidden;
+            transition: all 0.3s ease;
+        }
+
+        .detail-card:hover {
+            background: var(--bg-card-hover);
+            border-color: var(--border-active);
+            transform: translateY(-1px);
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+        }
+
+        .detail-header {
+            display: flex;
+            align-items: flex-start;
+            gap: 0.875rem;
+            padding: 1rem 1.25rem;
+            cursor: pointer;
+        }
+
+        .detail-toggle {
+            min-width: 28px;
+            padding-top: 2px;
+            text-align: center;
+            font-size: 14px;
+            opacity: 0.6;
+        }
+
+        .detail-title {
+            flex: 1;
+        }
+
+        .detail-title h3 {
+            font-size: 14px;
+            font-weight: 700;
+            color: var(--text-primary);
+            line-height: 1.4;
+            margin-bottom: 0.375rem;
+        }
+
+        .detail-meta {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 1rem;
+        }
+
+        .detail-meta span {
+            font-size: 12px;
+            color: var(--text-tertiary);
+        }
+
+        .detail-meta span strong {
+            color: var(--text-secondary);
+            font-weight: 600;
+        }
+
+        .detail-body {
+            padding: 0 1.25rem 1.25rem 3.75rem;
+            animation: fadeIn 0.3s ease;
+        }
+
+        .detail-body .info-box {
+            border-radius: 8px;
+            padding: 0.75rem 0.875rem;
+            margin-bottom: 1rem;
+        }
+
+        .detail-body .info-box.warn {
+            background: rgba(245, 158, 11, 0.06);
+            border: 1px solid rgba(245, 158, 11, 0.12);
+        }
+
+        .detail-body .info-box.info {
+            background: rgba(59, 130, 246, 0.05);
+            border: 1px solid rgba(59, 130, 246, 0.12);
+        }
+
+        .detail-body .info-box.safe-box {
+            background: rgba(34, 197, 94, 0.05);
+            border: 1px solid rgba(34, 197, 94, 0.12);
+        }
+
+        .detail-body .info-box .box-label {
+            font-family: 'JetBrains Mono', 'Fira Code', monospace;
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            margin-bottom: 0.375rem;
+        }
+
+        .detail-body .info-box.warn .box-label { color: var(--warning); }
+        .detail-body .info-box.info .box-label { color: var(--accent); }
+        .detail-body .info-box.safe-box .box-label { color: var(--success); }
+
+        .detail-body .info-box p {
+            font-size: 12px;
+            line-height: 1.6;
+            color: var(--text-secondary);
+        }
+
+        /* Copy button */
+        .copy-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.375rem;
+            padding: 5px 12px;
+            border-radius: 6px;
+            border: 1px solid var(--border);
+            background: transparent;
+            color: var(--text-muted);
+            font-family: 'JetBrains Mono', 'Fira Code', monospace;
+            font-size: 10px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .copy-btn:hover { color: var(--text-secondary); border-color: var(--border-active); }
+        .copy-btn.copied { color: var(--success); border-color: rgba(34, 197, 94, 0.3); }
+
+        /* JSON expandable */
+        .json-toggle {
+            font-family: 'JetBrains Mono', 'Fira Code', monospace;
+            font-size: 11px;
+            color: var(--text-muted);
+            cursor: pointer;
+            padding: 4px 0;
+            transition: color 0.2s;
+        }
+
+        .json-toggle:hover { color: var(--text-secondary); }
+
+        .json-box {
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 1rem;
+            margin-top: 0.5rem;
+            white-space: pre-wrap;
+            font-family: 'JetBrains Mono', 'Fira Code', monospace;
+            font-size: 11px;
+            color: var(--text-secondary);
+            max-height: 400px;
+            overflow-y: auto;
+            animation: fadeIn 0.3s ease;
+        }
+
+        /* Legacy result box (for image/video panels) */
         .result-box {
-            background: var(--bg-primary);
+            background: rgba(0, 0, 0, 0.3);
             border: 1px solid var(--border);
             border-radius: 8px;
             padding: 1rem;
             margin-top: 1rem;
             white-space: pre-wrap;
-            font-family: 'SF Mono', Monaco, monospace;
-            font-size: 0.85rem;
+            font-family: 'JetBrains Mono', 'Fira Code', monospace;
+            font-size: 12px;
             color: var(--text-secondary);
             max-height: 400px;
             overflow-y: auto;
         }
 
-        .result-box.success { border-color: var(--success); }
-        .result-box.error { border-color: var(--danger); }
+        .result-box.success { border-color: rgba(34, 197, 94, 0.3); }
+        .result-box.error { border-color: rgba(239, 68, 68, 0.3); }
 
         .loading {
             display: inline-flex;
             align-items: center;
             gap: 0.5rem;
             color: var(--text-secondary);
-            font-size: 0.9rem;
+            font-size: 13px;
         }
 
         .spinner {
-            width: 16px; height: 16px;
+            width: 14px; height: 14px;
             border: 2px solid var(--border);
-            border-top: 2px solid var(--accent);
+            border-top: 2px solid var(--danger);
             border-radius: 50%;
             animation: spin 0.8s linear infinite;
         }
 
-        @keyframes spin { to { transform: rotate(360deg); } }
-
-        /* Voice recording UI */
+        /* ── Voice Section ─────────────────────────────────────────── */
         .voice-section {
             display: flex;
             flex-direction: column;
@@ -206,24 +631,24 @@
         }
 
         .mic-button {
-            width: 120px; height: 120px;
+            width: 100px; height: 100px;
             border-radius: 50%;
             background: var(--bg-input);
-            border: 3px solid var(--border);
+            border: 2px solid var(--border);
             cursor: pointer;
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 3rem;
+            font-size: 2.5rem;
             transition: all 0.3s;
-            position: relative;
         }
 
-        .mic-button:hover { border-color: var(--accent); transform: scale(1.05); }
+        .mic-button:hover { border-color: rgba(239, 68, 68, 0.4); transform: scale(1.05); }
+
         .mic-button.recording {
             border-color: var(--danger);
             background: rgba(239, 68, 68, 0.1);
-            animation: pulse 1.5s infinite;
+            animation: micPulse 1.5s infinite;
         }
 
         .mic-button.processing {
@@ -231,13 +656,8 @@
             background: rgba(59, 130, 246, 0.1);
         }
 
-        @keyframes pulse {
-            0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); }
-            50% { box-shadow: 0 0 0 20px rgba(239, 68, 68, 0); }
-        }
-
         .voice-status {
-            font-size: 1rem;
+            font-size: 13px;
             color: var(--text-secondary);
             text-align: center;
         }
@@ -245,113 +665,200 @@
         .voice-status.recording { color: var(--danger); }
         .voice-status.processing { color: var(--accent); }
 
-        .audio-player {
-            width: 100%;
-            max-width: 400px;
-            margin-top: 1rem;
-        }
-
-        .audio-player audio { width: 100%; }
+        .audio-player { width: 100%; max-width: 400px; margin-top: 1rem; }
+        .audio-player audio { width: 100%; border-radius: 8px; }
 
         .visualizer-container {
-            width: 200px;
-            height: 60px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 3px;
+            width: 200px; height: 50px;
+            display: flex; align-items: center; justify-content: center; gap: 3px;
         }
 
         .viz-bar {
-            width: 4px;
+            width: 3px;
             background: var(--accent);
             border-radius: 2px;
             transition: height 0.1s;
-            min-height: 4px;
+            min-height: 3px;
         }
 
         .recording .viz-bar { background: var(--danger); }
 
+        /* ── Features Grid ─────────────────────────────────────────── */
         .features-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 1rem;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 0.75rem;
             margin-top: 1rem;
         }
 
         .feature-item {
-            background: var(--bg-primary);
+            background: var(--bg-card);
             border: 1px solid var(--border);
-            border-radius: 8px;
+            border-radius: 10px;
             padding: 1rem;
             text-align: center;
+            transition: all 0.2s;
         }
 
-        .feature-item .icon { font-size: 1.5rem; margin-bottom: 0.5rem; }
-        .feature-item .name { font-size: 0.85rem; color: var(--text-secondary); }
+        .feature-item:hover {
+            border-color: var(--border-active);
+            transform: translateY(-1px);
+        }
 
-        .actions { display: flex; gap: 0.75rem; margin-top: 1rem; flex-wrap: wrap; }
+        .feature-item .icon { font-size: 1.25rem; margin-bottom: 0.5rem; }
+        .feature-item .name { font-size: 12px; color: var(--text-secondary); }
+        .feature-item .name small { color: var(--text-muted); font-size: 10px; }
 
+        /* ── Demo hint ─────────────────────────────────────────────── */
+        .demo-hint {
+            padding: 0.875rem 1.125rem;
+            background: rgba(59, 130, 246, 0.06);
+            border: 1px solid rgba(59, 130, 246, 0.12);
+            border-radius: 8px;
+            margin-top: 1rem;
+        }
+
+        .demo-hint p {
+            font-size: 12px;
+            line-height: 1.6;
+            color: var(--text-tertiary);
+        }
+
+        .demo-hint .highlight { font-weight: 700; color: var(--accent); }
+
+        /* ── Responsive ────────────────────────────────────────────── */
         @media (max-width: 640px) {
             .container { padding: 1rem; }
             .tabs { gap: 0.25rem; }
-            .tab { padding: 0.5rem 0.75rem; font-size: 0.8rem; }
+            .tab { padding: 6px 12px; font-size: 11px; }
+            .header h1 { font-size: 28px; }
         }
     </style>
 </head>
 <body>
-    <div class="header">
-        <h1>🛡️ SENTINEL</h1>
-        <p>AI Content Detection — Text · Image · Audio · Video</p>
-    </div>
-
     <div class="container">
-        <div class="tabs">
-            <div class="tab active" data-panel="text">📝 Text</div>
-            <div class="tab" data-panel="voice">🎙️ Voice (Live API)</div>
-            <div class="tab" data-panel="image">🖼️ Image</div>
-            <div class="tab" data-panel="video">🎬 Video</div>
-        </div>
-
-        <!-- ── Text Panel ──────────────────────────────────────── -->
-        <div id="panel-text" class="panel active">
-            <div class="card">
-                <h2>📝 Text Analysis</h2>
-                <p style="color:var(--text-secondary); margin-bottom:1rem; font-size:0.9rem;">
-                    Paste text to analyse for AI-generation, misinformation, and harmful content.
-                </p>
-                <textarea id="text-input" placeholder="Paste text here to analyse..."></textarea>
-                <div class="actions">
-                    <button class="btn btn-primary" id="btn-analyse-text" onclick="analyseText()">
-                        🔍 Analyse Text
-                    </button>
-                    <button class="btn btn-primary" id="btn-detect-misinfo" onclick="detectMisinfo()">
-                        📰 Check Misinformation
-                    </button>
-                </div>
-                <div id="text-result" class="result-box" style="display:none;"></div>
+        <!-- ── Header (ContextGuard pattern) ──────────────────────── -->
+        <div class="header">
+            <div class="status">
+                <div class="status-dot"></div>
+                <span class="status-label">System Active</span>
             </div>
+            <h1>SENTINEL</h1>
+            <p>AI Content Detection Engine &mdash; Singapore</p>
         </div>
 
-        <!-- ── Voice Panel (Gemini Live API) ────────────────────── -->
+        <!-- ── Tabs ────────────────────────────────────────────────── -->
+        <div class="tabs">
+            <div class="tab active" data-panel="text">&#x1F4DD; Text</div>
+            <div class="tab" data-panel="voice">&#x1F399; Voice (Live API)</div>
+            <div class="tab" data-panel="image">&#x1F5BC; Image</div>
+            <div class="tab" data-panel="video">&#x1F3AC; Video</div>
+        </div>
+
+        <!-- ── Text Panel ──────────────────────────────────────────── -->
+        <div id="panel-text" class="panel active">
+            <!-- Input phase -->
+            <div id="text-input-phase">
+                <div class="card">
+                    <h2>&#x1F50D; Content Analysis</h2>
+                    <p class="card-desc">
+                        Paste text to analyse for AI-generation, misinformation, and harmful content.
+                        The pipeline runs GUARD safety &#x2192; misinformation check &#x2192; AI insights in real time.
+                    </p>
+                    <textarea id="text-input" placeholder="Paste text here to analyse...">A new study has found that drinking coffee can cure cancer. The research, conducted by unnamed scientists at an undisclosed university, claims that just two cups of coffee per day can eliminate all forms of cancer within weeks. Health authorities have not commented on these findings.</textarea>
+                    <div class="char-count"><span id="char-count">0</span> chars</div>
+                    <div class="actions">
+                        <button class="btn btn-primary" id="btn-analyse-text" onclick="analyseTextStream()">
+                            &#x25B6; Run Full Analysis
+                        </button>
+                        <button class="btn btn-secondary" id="btn-detect-misinfo" onclick="detectMisinfo()">
+                            &#x1F4F0; Misinformation Only
+                        </button>
+                    </div>
+                </div>
+                <div class="demo-hint">
+                    <p><span class="highlight">Demo mode:</span> Pre-loaded with a sample misinformation text.
+                    Click &#x25B6; Run Full Analysis to see the pipeline in action with real-time progress.</p>
+                </div>
+            </div>
+
+            <!-- Processing phase (ContextGuard-style animation) -->
+            <div id="text-processing-phase" style="display:none;">
+                <div class="processing-box">
+                    <div class="processing-header">
+                        <div class="dot"></div>
+                        <span>ANALYSING</span>
+                    </div>
+                    <div id="pipeline-steps">
+                        <div class="pipeline-step pending" data-step="guard">
+                            <div class="icon">&#x25CB;</div>
+                            <div class="label">Running GUARD safety check</div>
+                            <div class="status-text"></div>
+                        </div>
+                        <div class="pipeline-step pending" data-step="misinfo">
+                            <div class="icon">&#x25CB;</div>
+                            <div class="label">Detecting misinformation</div>
+                            <div class="status-text"></div>
+                        </div>
+                        <div class="pipeline-step pending" data-step="insights">
+                            <div class="icon">&#x25CB;</div>
+                            <div class="label">Generating AI insights</div>
+                            <div class="status-text"></div>
+                        </div>
+                    </div>
+                    <div id="finalizing-indicator" style="display:none; border-top:1px solid var(--border); margin-top:1rem; padding-top:1rem;">
+                        <div style="display:flex; align-items:center; gap:0.625rem;">
+                            <div style="width:8px; height:8px; border-radius:50%; background:var(--success); animation:pulse 1s infinite;"></div>
+                            <span style="font-family:monospace; font-size:12px; letter-spacing:0.06em; color:var(--success);">Finalizing results...</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Results phase (ContextGuard-style cards) -->
+            <div id="text-results-phase" style="display:none;">
+                <div class="results-container">
+                    <!-- Verdict banner -->
+                    <div id="verdict-banner"></div>
+
+                    <!-- Detection detail cards -->
+                    <div id="detection-details"></div>
+
+                    <!-- Raw JSON toggle -->
+                    <div style="margin-top:1rem;">
+                        <div class="json-toggle" onclick="toggleRawJson()">&#x25B8; Show raw JSON response</div>
+                        <div id="raw-json-box" class="json-box" style="display:none;"></div>
+                    </div>
+
+                    <!-- Copy + New Analysis buttons -->
+                    <div style="display:flex; gap:0.75rem; margin-top:1rem; flex-wrap:wrap;">
+                        <button class="copy-btn" onclick="copyResults()">&#x1F4CB; Copy Results</button>
+                        <button class="btn btn-secondary" onclick="resetTextPanel()">&#x2190; New Analysis</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Legacy result box for misinfo-only mode -->
+            <div id="text-result" class="result-box" style="display:none;"></div>
+        </div>
+
+        <!-- ── Voice Panel (Gemini Live API) ────────────────────────── -->
         <div id="panel-voice" class="panel">
             <div class="card">
-                <h2>🎙️ Voice — Gemini Live API</h2>
-                <p style="color:var(--text-secondary); margin-bottom:0.5rem; font-size:0.9rem;">
+                <h2>&#x1F399; Voice &mdash; Gemini Live API</h2>
+                <p class="card-desc">
                     Speak to SENTINEL. Your audio is sent to Gemini Live API for real-time
                     speech-to-speech analysis. Click the microphone to start recording.
                 </p>
                 <div class="voice-section">
-                    <div class="visualizer-container" id="visualizer">
-                        <!-- Bars added by JS -->
-                    </div>
+                    <div class="visualizer-container" id="visualizer"></div>
                     <button class="mic-button" id="mic-btn" onclick="toggleRecording()">
-                        🎙️
+                        &#x1F399;
                     </button>
                     <div class="voice-status" id="voice-status">Click to start recording</div>
                     <div class="audio-player" id="audio-response" style="display:none;">
-                        <p style="color:var(--text-secondary); font-size:0.85rem; margin-bottom:0.5rem;">
-                            🔊 SENTINEL Response:
+                        <p style="color:var(--text-secondary); font-size:12px; margin-bottom:0.5rem;">
+                            &#x1F50A; SENTINEL Response:
                         </p>
                         <audio id="response-audio" controls></audio>
                     </div>
@@ -360,41 +867,43 @@
             </div>
 
             <div class="card">
-                <h2>📁 Upload Audio File</h2>
-                <p style="color:var(--text-secondary); margin-bottom:1rem; font-size:0.9rem;">
+                <h2>&#x1F4C1; Upload Audio File</h2>
+                <p class="card-desc">
                     Upload a pre-recorded audio file for Gemini Live API analysis.
                 </p>
                 <div class="file-upload" id="audio-dropzone">
-                    <div class="icon">🎵</div>
-                    <div class="label">Drop audio file or click to browse</div>
+                    <div class="icon">&#x1F3B5;</div>
+                    <div class="label">Drop audio file here</div>
+                    <div class="sublabel">or click to browse</div>
                     <div class="filename" id="audio-filename"></div>
                     <input type="file" id="audio-file" accept="audio/*" onchange="handleAudioFile(this)">
                 </div>
                 <div class="actions">
                     <button class="btn btn-primary" id="btn-upload-audio" onclick="uploadAudio()" disabled>
-                        🔊 Analyse Audio
+                        &#x1F50A; Analyse Audio
                     </button>
                 </div>
                 <div id="upload-audio-result" class="result-box" style="display:none;"></div>
                 <div class="audio-player" id="upload-audio-response" style="display:none;">
-                    <p style="color:var(--text-secondary); font-size:0.85rem; margin-bottom:0.5rem; margin-top:1rem;">
-                        🔊 SENTINEL Response:
+                    <p style="color:var(--text-secondary); font-size:12px; margin-bottom:0.5rem; margin-top:1rem;">
+                        &#x1F50A; SENTINEL Response:
                     </p>
                     <audio id="upload-response-audio" controls></audio>
                 </div>
             </div>
         </div>
 
-        <!-- ── Image Panel ─────────────────────────────────────── -->
+        <!-- ── Image Panel ─────────────────────────────────────────── -->
         <div id="panel-image" class="panel">
             <div class="card">
-                <h2>🖼️ Image Analysis</h2>
-                <p style="color:var(--text-secondary); margin-bottom:1rem; font-size:0.9rem;">
+                <h2>&#x1F5BC; Image Analysis</h2>
+                <p class="card-desc">
                     Upload an image to detect AI-generation, manipulation, or deepfake artifacts.
                 </p>
                 <div class="file-upload" id="image-dropzone">
-                    <div class="icon">🖼️</div>
-                    <div class="label">Drop image or click to browse</div>
+                    <div class="icon">&#x1F5BC;</div>
+                    <div class="label">Drop image here</div>
+                    <div class="sublabel">or click to browse</div>
                     <div class="filename" id="image-filename"></div>
                     <input type="file" id="image-file" accept="image/*" onchange="handleImageFile(this)">
                 </div>
@@ -403,64 +912,65 @@
                 </div>
                 <div class="actions">
                     <button class="btn btn-primary" id="btn-detect-image" onclick="detectImage()" disabled>
-                        🔍 Detect AI Image
+                        &#x1F50D; Detect AI Image
                     </button>
-                    <button class="btn btn-primary" id="btn-detect-manip" onclick="detectManipulation()" disabled>
-                        🎭 Detect Manipulation
+                    <button class="btn btn-secondary" id="btn-detect-manip" onclick="detectManipulation()" disabled>
+                        &#x1F3AD; Detect Manipulation
                     </button>
                 </div>
                 <div id="image-result" class="result-box" style="display:none;"></div>
             </div>
         </div>
 
-        <!-- ── Video Panel ─────────────────────────────────────── -->
+        <!-- ── Video Panel ─────────────────────────────────────────── -->
         <div id="panel-video" class="panel">
             <div class="card">
-                <h2>🎬 Video Analysis</h2>
-                <p style="color:var(--text-secondary); margin-bottom:1rem; font-size:0.9rem;">
+                <h2>&#x1F3AC; Video Analysis</h2>
+                <p class="card-desc">
                     Upload a video to analyse frames for AI-generation signals and deepfake detection.
                 </p>
                 <div class="file-upload" id="video-dropzone">
-                    <div class="icon">🎬</div>
-                    <div class="label">Drop video or click to browse</div>
+                    <div class="icon">&#x1F3AC;</div>
+                    <div class="label">Drop video here</div>
+                    <div class="sublabel">or click to browse</div>
                     <div class="filename" id="video-filename"></div>
                     <input type="file" id="video-file" accept="video/*" onchange="handleVideoFile(this)">
                 </div>
                 <div class="actions">
                     <button class="btn btn-primary" id="btn-detect-video" onclick="detectVideo()" disabled>
-                        🔍 Analyse Video
+                        &#x1F50D; Analyse Video
                     </button>
                 </div>
                 <div id="video-result" class="result-box" style="display:none;"></div>
             </div>
         </div>
 
-        <!-- ── Feature Overview ─────────────────────────────────── -->
+        <!-- ── Features (ContextGuard-style) ───────────────────────── -->
         <div class="card">
-            <h2>Features</h2>
+            <h2>&#x2699; Capabilities</h2>
             <div class="features-grid">
                 <div class="feature-item">
-                    <div class="icon">🤖</div>
-                    <div class="name">AI Content Detection<br><small>SEA-LION GUARD</small></div>
+                    <div class="icon">&#x1F6E1;</div>
+                    <div class="name">GUARD Safety<br><small>SEA-LION GUARD</small></div>
                 </div>
                 <div class="feature-item">
-                    <div class="icon">📰</div>
-                    <div class="name">Misinformation Check<br><small>Gemini + Groq</small></div>
+                    <div class="icon">&#x1F4F0;</div>
+                    <div class="name">Misinformation<br><small>Gemini + Groq</small></div>
                 </div>
                 <div class="feature-item">
-                    <div class="icon">🎙️</div>
+                    <div class="icon">&#x1F399;</div>
                     <div class="name">Voice Analysis<br><small>Gemini Live API</small></div>
                 </div>
                 <div class="feature-item">
-                    <div class="icon">🌏</div>
-                    <div class="name">Multilingual<br><small>EN · ZH · MS · TA</small></div>
+                    <div class="icon">&#x1F30F;</div>
+                    <div class="name">Multilingual<br><small>EN &middot; ZH &middot; MS &middot; TA</small></div>
                 </div>
             </div>
         </div>
     </div>
 
     <script>
-        // ── Tab Navigation ─────────────────────────────────────
+        // ── Tab Navigation ─────────────────────────────────────────
         document.querySelectorAll('.tab').forEach(tab => {
             tab.addEventListener('click', () => {
                 document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
@@ -470,7 +980,17 @@
             });
         });
 
-        // ── Helpers ────────────────────────────────────────────
+        // ── Character counter ──────────────────────────────────────
+        const textInput = document.getElementById('text-input');
+        const charCount = document.getElementById('char-count');
+        function updateCharCount() { charCount.textContent = textInput.value.length; }
+        textInput.addEventListener('input', updateCharCount);
+        updateCharCount();
+
+        // Store last analysis result for copy/export
+        let lastAnalysisResult = null;
+
+        // ── Helpers ────────────────────────────────────────────────
         function showResult(id, data, isError) {
             const el = document.getElementById(id);
             el.style.display = 'block';
@@ -485,31 +1005,311 @@
             el.innerHTML = '<span class="loading"><span class="spinner"></span> Analysing...</span>';
         }
 
-        // ── Text Analysis ──────────────────────────────────────
-        async function analyseText() {
-            const text = document.getElementById('text-input').value.trim();
-            if (!text) return alert('Please enter text to analyse.');
+        // ── SSE Text Analysis (ContextGuard pattern) ───────────────
+        async function analyseTextStream() {
+            const text = textInput.value.trim();
+            if (!text) return;
 
-            const btn = document.getElementById('btn-analyse-text');
-            btn.disabled = true;
-            showLoading('text-result');
+            // Switch to processing phase
+            document.getElementById('text-input-phase').style.display = 'none';
+            document.getElementById('text-results-phase').style.display = 'none';
+            document.getElementById('text-result').style.display = 'none';
+            document.getElementById('text-processing-phase').style.display = 'block';
+
+            // Reset step UI
+            document.querySelectorAll('.pipeline-step').forEach(step => {
+                step.className = 'pipeline-step pending';
+                step.querySelector('.icon').textContent = '\u25CB';
+                step.querySelector('.status-text').textContent = '';
+            });
+            document.getElementById('finalizing-indicator').style.display = 'none';
 
             try {
-                const form = new FormData();
-                form.append('text', text);
-                const res = await fetch('/analyse', { method: 'POST', body: form });
-                const data = await res.json();
-                showResult('text-result', data, !res.ok);
+                const res = await fetch('/analyse-stream', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ text }),
+                });
+
+                if (!res.body) throw new Error('No stream body');
+
+                const reader = res.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = '';
+                let result = null;
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    buffer += decoder.decode(value, { stream: true });
+
+                    const lines = buffer.split('\n');
+                    buffer = lines.pop() || '';
+
+                    let currentEvent = '';
+                    for (const line of lines) {
+                        if (line.startsWith('event: ')) {
+                            currentEvent = line.slice(7);
+                        } else if (line.startsWith('data: ')) {
+                            const data = JSON.parse(line.slice(6));
+                            if (currentEvent === 'step') {
+                                updatePipelineStep(data.id, data.status, data.data);
+                            } else if (currentEvent === 'result') {
+                                result = data;
+                            } else if (currentEvent === 'error') {
+                                throw new Error(data.message);
+                            }
+                        }
+                    }
+                }
+
+                if (result) {
+                    // Brief delay to show final step completion
+                    await new Promise(r => setTimeout(r, 600));
+                    showAnalysisResults(result);
+                }
+
             } catch (e) {
+                console.error('SSE error:', e);
+                document.getElementById('text-processing-phase').style.display = 'none';
+                document.getElementById('text-input-phase').style.display = 'block';
+                document.getElementById('text-result').style.display = 'block';
                 showResult('text-result', 'Error: ' + e.message, true);
-            } finally {
-                btn.disabled = false;
             }
         }
 
+        function updatePipelineStep(id, status, data) {
+            const step = document.querySelector(`.pipeline-step[data-step="${id}"]`);
+            if (!step) return;
+
+            step.className = `pipeline-step ${status}`;
+            const icon = step.querySelector('.icon');
+            const statusText = step.querySelector('.status-text');
+
+            if (status === 'running') {
+                icon.innerHTML = '<span class="step-dot-running"></span>';
+                statusText.textContent = 'processing...';
+            } else if (status === 'done') {
+                icon.textContent = '\u2713';
+                statusText.textContent = '';
+
+                // Show brief summary
+                if (id === 'guard' && data) {
+                    const safe = data.is_safe;
+                    statusText.textContent = safe === true ? 'safe' : safe === false ? 'flagged' : 'error';
+                } else if (id === 'misinfo' && data) {
+                    statusText.textContent = data.misinformation_detected ? 'detected' : 'clean';
+                } else if (id === 'insights' && data) {
+                    statusText.textContent = 'complete';
+                }
+            }
+        }
+
+        function showAnalysisResults(result) {
+            lastAnalysisResult = result;
+
+            document.getElementById('text-processing-phase').style.display = 'none';
+            document.getElementById('text-results-phase').style.display = 'block';
+
+            // Build verdict banner
+            const isSafe = result.is_safe;
+            let verdictClass, verdictIcon, verdictTitle, verdictDesc;
+
+            if (isSafe === true) {
+                verdictClass = 'safe';
+                verdictIcon = '\u2705';
+                verdictTitle = 'Content Appears Safe';
+                verdictDesc = 'No AI-generation, misinformation, or harmful content detected.';
+            } else if (isSafe === false) {
+                verdictClass = 'unsafe';
+                verdictIcon = '\u26A0\uFE0F';
+                verdictTitle = 'Issues Detected';
+                verdictDesc = 'This content may contain AI-generated, misleading, or harmful material.';
+            } else {
+                verdictClass = 'unknown';
+                verdictIcon = '\u2753';
+                verdictTitle = 'Analysis Inconclusive';
+                verdictDesc = 'Unable to fully assess this content. Some checks may have failed.';
+            }
+
+            document.getElementById('verdict-banner').innerHTML = `
+                <div class="verdict-card ${verdictClass}">
+                    <div class="verdict-icon">${verdictIcon}</div>
+                    <div class="verdict-text">
+                        <h3>${verdictTitle}</h3>
+                        <p>${verdictDesc}</p>
+                    </div>
+                </div>
+            `;
+
+            // Build detail cards
+            let detailsHtml = '';
+
+            // 1. GUARD result
+            const guard = result.detection_result || {};
+            const guardSafe = guard.is_safe;
+            const guardBadge = guardSafe === true
+                ? '<span class="risk-badge safe"><span class="badge-dot"></span>SAFE</span>'
+                : guardSafe === false
+                ? '<span class="risk-badge unsafe"><span class="badge-dot"></span>UNSAFE</span>'
+                : '<span class="risk-badge warning"><span class="badge-dot"></span>ERROR</span>';
+
+            detailsHtml += `
+                <div class="detail-card" id="card-guard">
+                    <div class="detail-header" onclick="toggleCard('card-guard')">
+                        <div class="detail-toggle">\u25B8</div>
+                        <div class="detail-title">
+                            <div style="margin-bottom:0.5rem;">${guardBadge}</div>
+                            <h3>SEA-LION GUARD Safety Check</h3>
+                            <div class="detail-meta">
+                                <span><strong>Label:</strong> ${guard.label || 'N/A'}</span>
+                                <span><strong>Model:</strong> SEA-LION GUARD</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="detail-body" id="body-card-guard" style="display:none;">
+                        <div class="info-box ${guardSafe === false ? 'warn' : 'safe-box'}">
+                            <div class="box-label">${guardSafe === false ? 'Safety Flag Detected' : 'No Safety Issues'}</div>
+                            <p>${guard.safety_flag ? 'Flag: ' + guard.safety_flag : 'Content passed all safety checks.'}</p>
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            // 2. Misinformation result
+            const misinfo = result.misinfo_result || {};
+            const misinfoDetected = misinfo.misinformation_detected;
+            const misinfoBadge = misinfoDetected
+                ? '<span class="risk-badge unsafe"><span class="badge-dot"></span>MISINFORMATION</span>'
+                : '<span class="risk-badge safe"><span class="badge-dot"></span>CLEAN</span>';
+
+            let claimsHtml = '';
+            if (misinfo.claims && misinfo.claims.length > 0) {
+                claimsHtml = '<div style="margin-top:0.75rem;"><strong style="font-size:11px; color:var(--text-tertiary);">Suspicious Claims:</strong><ul style="margin-top:0.375rem; padding-left:1.25rem;">' +
+                    misinfo.claims.map(c => `<li style="font-size:12px; color:var(--text-secondary); margin-bottom:0.25rem;">${escapeHtml(c)}</li>`).join('') +
+                    '</ul></div>';
+            }
+
+            detailsHtml += `
+                <div class="detail-card" id="card-misinfo">
+                    <div class="detail-header" onclick="toggleCard('card-misinfo')">
+                        <div class="detail-toggle">\u25B8</div>
+                        <div class="detail-title">
+                            <div style="margin-bottom:0.5rem;">${misinfoBadge}</div>
+                            <h3>Misinformation Detection</h3>
+                            <div class="detail-meta">
+                                <span><strong>Type:</strong> ${misinfo.misinformation_type || 'none'}</span>
+                                <span><strong>Model:</strong> Gemini / Groq</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="detail-body" id="body-card-misinfo" style="display:none;">
+                        <div class="info-box ${misinfoDetected ? 'warn' : 'safe-box'}">
+                            <div class="box-label">${misinfoDetected ? 'Misinformation Analysis' : 'No Misinformation Found'}</div>
+                            <p>${escapeHtml(misinfo.explanation || 'No further details.')}</p>
+                            ${claimsHtml}
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            // 3. Insights result
+            const insights = result.insights_result || {};
+            const insightsBadge = insights.is_harmful
+                ? '<span class="risk-badge unsafe"><span class="badge-dot"></span>HARMFUL</span>'
+                : '<span class="risk-badge safe"><span class="badge-dot"></span>OK</span>';
+
+            detailsHtml += `
+                <div class="detail-card" id="card-insights">
+                    <div class="detail-header" onclick="toggleCard('card-insights')">
+                        <div class="detail-toggle">\u25B8</div>
+                        <div class="detail-title">
+                            <div style="margin-bottom:0.5rem;">${insightsBadge}</div>
+                            <h3>AI Insights &amp; Explanation</h3>
+                            <div class="detail-meta">
+                                <span><strong>LLM:</strong> ${insights.llm_used || 'N/A'}</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="detail-body" id="body-card-insights" style="display:none;">
+                        <div class="info-box info">
+                            <div class="box-label">Analysis</div>
+                            <p>${escapeHtml(insights.explanation || insights.summary || JSON.stringify(insights, null, 2))}</p>
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            document.getElementById('detection-details').innerHTML = detailsHtml;
+
+            // Populate raw JSON
+            document.getElementById('raw-json-box').textContent = JSON.stringify(result, null, 2);
+
+            // Auto-expand cards with issues
+            if (guardSafe === false) toggleCard('card-guard');
+            if (misinfoDetected) toggleCard('card-misinfo');
+            if (insights.is_harmful) toggleCard('card-insights');
+            // If everything is safe, expand insights to show summary
+            if (isSafe === true) toggleCard('card-insights');
+        }
+
+        function toggleCard(cardId) {
+            const body = document.getElementById('body-' + cardId);
+            const toggle = document.querySelector(`#${cardId} .detail-toggle`);
+            if (body.style.display === 'none') {
+                body.style.display = 'block';
+                toggle.textContent = '\u25BE';
+            } else {
+                body.style.display = 'none';
+                toggle.textContent = '\u25B8';
+            }
+        }
+
+        function toggleRawJson() {
+            const box = document.getElementById('raw-json-box');
+            const toggle = box.previousElementSibling;
+            if (box.style.display === 'none') {
+                box.style.display = 'block';
+                toggle.innerHTML = '\u25BE Show raw JSON response';
+            } else {
+                box.style.display = 'none';
+                toggle.innerHTML = '\u25B8 Show raw JSON response';
+            }
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function copyResults() {
+            const btn = event.target.closest('.copy-btn');
+            const text = lastAnalysisResult
+                ? JSON.stringify(lastAnalysisResult, null, 2)
+                : '';
+            navigator.clipboard.writeText(text).then(() => {
+                btn.classList.add('copied');
+                btn.innerHTML = '\u2713 Copied';
+                setTimeout(() => {
+                    btn.classList.remove('copied');
+                    btn.innerHTML = '\uD83D\uDCCB Copy Results';
+                }, 2000);
+            });
+        }
+
+        function resetTextPanel() {
+            document.getElementById('text-results-phase').style.display = 'none';
+            document.getElementById('text-processing-phase').style.display = 'none';
+            document.getElementById('text-input-phase').style.display = 'block';
+            document.getElementById('text-result').style.display = 'none';
+            lastAnalysisResult = null;
+        }
+
+        // ── Legacy misinfo-only endpoint ───────────────────────────
         async function detectMisinfo() {
-            const text = document.getElementById('text-input').value.trim();
-            if (!text) return alert('Please enter text to check.');
+            const text = textInput.value.trim();
+            if (!text) return;
 
             const btn = document.getElementById('btn-detect-misinfo');
             btn.disabled = true;
@@ -528,7 +1328,7 @@
             }
         }
 
-        // ── Helpers ────────────────────────────────────────────
+        // ── Helpers ────────────────────────────────────────────────
         function playBase64Audio(base64String, audioElementId) {
             const audioBytes = Uint8Array.from(atob(base64String), c => c.charCodeAt(0));
             const blob = new Blob([audioBytes], { type: 'audio/ogg' });
@@ -539,7 +1339,7 @@
             return url;
         }
 
-        // ── Voice Recording (Gemini Live API) ──────────────────
+        // ── Voice Recording (Gemini Live API) ──────────────────────
         let mediaRecorder = null;
         let audioChunks = [];
         let isRecording = false;
@@ -553,7 +1353,7 @@
         for (let i = 0; i < NUM_BARS; i++) {
             const bar = document.createElement('div');
             bar.className = 'viz-bar';
-            bar.style.height = '4px';
+            bar.style.height = '3px';
             vizContainer.appendChild(bar);
         }
 
@@ -566,7 +1366,7 @@
             const step = Math.floor(data.length / NUM_BARS);
             bars.forEach((bar, i) => {
                 const val = data[i * step] || 0;
-                bar.style.height = Math.max(4, (val / 255) * 50) + 'px';
+                bar.style.height = Math.max(3, (val / 255) * 45) + 'px';
             });
 
             animFrameId = requestAnimationFrame(updateVisualizer);
@@ -584,7 +1384,6 @@
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
-                // Audio visualizer
                 audioContext = new AudioContext();
                 const source = audioContext.createMediaStreamSource(stream);
                 analyserNode = audioContext.createAnalyser();
@@ -593,12 +1392,11 @@
                 updateVisualizer();
                 vizContainer.classList.add('recording');
 
-                // Recorder — use WebM if supported, fall back to mp4 for Safari
                 let recorderMime = 'audio/webm;codecs=opus';
                 if (!MediaRecorder.isTypeSupported(recorderMime)) {
                     recorderMime = 'audio/mp4';
                     if (!MediaRecorder.isTypeSupported(recorderMime)) {
-                        recorderMime = '';  // Let browser choose default
+                        recorderMime = '';
                     }
                 }
                 const recorderOpts = recorderMime ? { mimeType: recorderMime } : {};
@@ -612,7 +1410,7 @@
                 mediaRecorder.onstop = async () => {
                     cancelAnimationFrame(animFrameId);
                     vizContainer.classList.remove('recording');
-                    vizContainer.querySelectorAll('.viz-bar').forEach(b => b.style.height = '4px');
+                    vizContainer.querySelectorAll('.viz-bar').forEach(b => b.style.height = '3px');
 
                     stream.getTracks().forEach(t => t.stop());
                     if (audioContext) { audioContext.close(); audioContext = null; }
@@ -621,14 +1419,14 @@
                     await sendAudioToLiveAPI(audioBlob);
                 };
 
-                mediaRecorder.start(250); // Collect chunks every 250ms
+                mediaRecorder.start(250);
                 isRecording = true;
 
                 const micBtn = document.getElementById('mic-btn');
                 micBtn.classList.add('recording');
-                micBtn.textContent = '⏹️';
+                micBtn.textContent = '\u23F9\uFE0F';
                 document.getElementById('voice-status').className = 'voice-status recording';
-                document.getElementById('voice-status').textContent = '🔴 Recording... Click to stop';
+                document.getElementById('voice-status').textContent = '\uD83D\uDD34 Recording... Click to stop';
                 document.getElementById('audio-response').style.display = 'none';
 
             } catch (e) {
@@ -646,9 +1444,9 @@
             const micBtn = document.getElementById('mic-btn');
             micBtn.classList.remove('recording');
             micBtn.classList.add('processing');
-            micBtn.textContent = '⏳';
+            micBtn.textContent = '\u23F3';
             document.getElementById('voice-status').className = 'voice-status processing';
-            document.getElementById('voice-status').textContent = '⏳ Processing with Gemini Live API...';
+            document.getElementById('voice-status').textContent = '\u23F3 Processing with Gemini Live API...';
         }
 
         async function sendAudioToLiveAPI(audioBlob) {
@@ -656,12 +1454,10 @@
             const statusEl = document.getElementById('voice-status');
 
             try {
-                // Use WebSocket for real-time communication
                 const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
                 const ws = new WebSocket(`${protocol}//${location.host}/ws/live-audio`);
 
                 ws.onopen = () => {
-                    // Send audio as binary
                     audioBlob.arrayBuffer().then(buffer => {
                         ws.send(new Uint8Array(buffer));
                         ws.send('END');
@@ -680,11 +1476,11 @@
                             document.getElementById('audio-response').style.display = 'block';
 
                             statusEl.className = 'voice-status';
-                            statusEl.textContent = '✅ Response received — click to record again';
+                            statusEl.textContent = '\u2705 Response received \u2014 click to record again';
                             showResult('voice-result', 'Gemini Live API response received successfully.', false);
                         } else {
                             statusEl.className = 'voice-status';
-                            statusEl.textContent = '⚠️ No audio response — try again';
+                            statusEl.textContent = '\u26A0\uFE0F No audio response \u2014 try again';
                             showResult('voice-result', data.error || 'No audio returned', true);
                         }
                     } catch (e) {
@@ -692,15 +1488,13 @@
                     }
                 };
 
-                ws.onerror = (e) => {
-                    console.error('WS error:', e);
-                    // Fallback to REST endpoint
+                ws.onerror = () => {
                     fallbackToREST(audioBlob);
                 };
 
                 ws.onclose = () => {
                     micBtn.classList.remove('processing');
-                    micBtn.textContent = '🎙️';
+                    micBtn.textContent = '\uD83C\uDF99';
                 };
 
             } catch (e) {
@@ -721,25 +1515,24 @@
                 if (data.success && data.audio) {
                     playBase64Audio(data.audio, 'response-audio');
                     document.getElementById('audio-response').style.display = 'block';
-
                     statusEl.className = 'voice-status';
-                    statusEl.textContent = '✅ Response received — click to record again';
+                    statusEl.textContent = '\u2705 Response received \u2014 click to record again';
                 } else {
                     statusEl.className = 'voice-status';
-                    statusEl.textContent = '⚠️ No audio response — try again';
+                    statusEl.textContent = '\u26A0\uFE0F No audio response \u2014 try again';
                     showResult('voice-result', data.error || 'No audio returned', true);
                 }
             } catch (e) {
                 statusEl.className = 'voice-status';
-                statusEl.textContent = '❌ Error — try again';
+                statusEl.textContent = '\u274C Error \u2014 try again';
                 showResult('voice-result', 'Error: ' + e.message, true);
             } finally {
                 micBtn.classList.remove('processing');
-                micBtn.textContent = '🎙️';
+                micBtn.textContent = '\uD83C\uDF99';
             }
         }
 
-        // ── Audio File Upload ──────────────────────────────────
+        // ── Audio File Upload ──────────────────────────────────────
         function handleAudioFile(input) {
             if (input.files.length > 0) {
                 document.getElementById('audio-filename').textContent = input.files[0].name;
@@ -764,7 +1557,7 @@
                 if (data.success && data.audio) {
                     playBase64Audio(data.audio, 'upload-response-audio');
                     document.getElementById('upload-audio-response').style.display = 'block';
-                    showResult('upload-audio-result', 'Audio analysis complete — response playing above.', false);
+                    showResult('upload-audio-result', 'Audio analysis complete \u2014 response playing above.', false);
                 } else {
                     showResult('upload-audio-result', data.error || 'No audio returned', true);
                 }
@@ -775,7 +1568,7 @@
             }
         }
 
-        // ── Image Analysis ─────────────────────────────────────
+        // ── Image Analysis ─────────────────────────────────────────
         function handleImageFile(input) {
             if (input.files.length > 0) {
                 const file = input.files[0];
@@ -783,7 +1576,6 @@
                 document.getElementById('btn-detect-image').disabled = false;
                 document.getElementById('btn-detect-manip').disabled = false;
 
-                // Preview
                 const reader = new FileReader();
                 reader.onload = (e) => {
                     document.getElementById('preview-img').src = e.target.result;
@@ -835,7 +1627,7 @@
             }
         }
 
-        // ── Video Analysis ─────────────────────────────────────
+        // ── Video Analysis ─────────────────────────────────────────
         function handleVideoFile(input) {
             if (input.files.length > 0) {
                 document.getElementById('video-filename').textContent = input.files[0].name;
