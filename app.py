@@ -34,6 +34,12 @@ except Exception:
 
 logger = logging.getLogger(__name__)
 
+# Audio MIME type mapping for file extensions
+AUDIO_MIME_TYPES = {
+    ".ogg": "audio/ogg", ".mp3": "audio/mpeg", ".wav": "audio/wav",
+    ".webm": "audio/webm", ".mp4": "audio/mp4", ".m4a": "audio/mp4",
+}
+
 app = FastAPI(
     title="SENTINEL — AI Content Detection",
     description="Multimodal AI content detection: text, image, audio (Gemini Live API), and video analysis.",
@@ -225,9 +231,7 @@ async def analyse_audio(file: UploadFile = File(...)):
 
         # Determine MIME type from filename
         ext = os.path.splitext(file.filename or "")[1].lower()
-        mime_map = {".ogg": "audio/ogg", ".mp3": "audio/mpeg", ".wav": "audio/wav",
-                    ".webm": "audio/webm", ".mp4": "audio/mp4", ".m4a": "audio/mp4"}
-        mime_type = mime_map.get(ext, "audio/webm")
+        mime_type = AUDIO_MIME_TYPES.get(ext, "audio/webm")
 
         reply_ogg = await live_voice_exchange(
             audio_bytes=audio_bytes,
