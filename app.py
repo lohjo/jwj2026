@@ -6,14 +6,16 @@ endpoints for text, image, audio (Gemini Live API), and video analysis.
 """
 
 from fastapi import FastAPI, UploadFile, File, Form, Query, WebSocket, WebSocketDisconnect
-from fastapi.responses import JSONResponse, HTMLResponse
+from fastapi.responses import JSONResponse, HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 import shutil
 import os
 import asyncio
 import uuid
 import logging
 import base64
+import json
 
 from pipeline.detector import run_full_detection, detect_misinformation
 from pipeline.guard import run_guard_detection
@@ -211,6 +213,114 @@ async def full_analysis(text: str = Form(...)):
     except Exception as e:
         logger.exception("[API] Full analysis failed: %s", e)
         return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+# ── SSE Streaming Pipeline (ContextGuard pattern) ────────────────────────────
+
+
+class AnalyseStreamRequest(BaseModel):
+    text: str
+
+
+@app.post("/analyse-stream")
+async def analyse_stream(body: AnalyseStreamRequest):
+    """
+    Run the full detection pipeline with SSE streaming progress updates.
+
+    Streams step-by-step progress (GUARD → Misinformation → Insights)
+    in real time using Server-Sent Events, following the ContextGuard pattern.
+
+    Event types:
+    - step: {id, status, data?} — pipeline step status update
+    - result: full detection result object
+    """
+    text = body.text
+    if not text or not text.strip():
+        return JSONResponse(
+            status_code=400,
+            content={"error": "Text is required"},
+        )
+
+    async def generate():
+        def sse(event: str, data: dict) -> str:
+            return f"event: {event}\ndata: {json.dumps(data)}\n\n"
+
+        try:
+            # Step 1: GUARD detection
+            yield sse("step", {"id": "guard", "status": "running"})
+            try:
+                guard_result = await run_guard_detection(
+                    text, content_type="text", source_lang="en"
+                )
+            except Exception as exc:
+                logger.exception("[SSE] GUARD detection failed: %s", exc)
+                guard_result = {
+                    "is_safe": None,
+                    "label": "api_error",
+                    "raw_response": {},
+                    "safety_flag": None,
+                }
+            yield sse("step", {"id": "guard", "status": "done", "data": guard_result})
+
+            # Step 2: Misinformation detection
+            yield sse("step", {"id": "misinfo", "status": "running"})
+            try:
+                misinfo_result = await detect_misinformation(
+                    text, context_description="text"
+                )
+            except Exception as exc:
+                logger.exception("[SSE] Misinfo detection failed: %s", exc)
+                misinfo_result = {
+                    "misinformation_detected": False,
+                    "misinformation_type": "none",
+                    "claims": [],
+                    "explanation": "Unavailable.",
+                }
+            yield sse("step", {"id": "misinfo", "status": "done", "data": misinfo_result})
+
+            # Step 3: Insights
+            yield sse("step", {"id": "insights", "status": "running"})
+            try:
+                insights_result = await run_insights(
+                    text, guard_result, misinformation_result=misinfo_result
+                )
+            except Exception as exc:
+                logger.exception("[SSE] Insights failed: %s", exc)
+                insights_result = {}
+            yield sse("step", {"id": "insights", "status": "done", "data": insights_result})
+
+            # Compute combined verdict
+            guard_safe = guard_result.get("is_safe")
+            misinfo_detected = misinfo_result.get("misinformation_detected", False)
+            is_harmful = (insights_result or {}).get("is_harmful", False)
+
+            if guard_safe is None:
+                combined_is_safe = None
+            elif guard_safe is False or misinfo_detected or is_harmful:
+                combined_is_safe = False
+            else:
+                combined_is_safe = True
+
+            full_result = {
+                "detection_result": guard_result,
+                "misinfo_result": misinfo_result,
+                "manipulation_result": None,
+                "insights_result": insights_result,
+                "is_safe": combined_is_safe,
+                "misinfo_type": misinfo_result.get("misinformation_type", "none"),
+            }
+
+            yield sse("result", full_result)
+
+        except Exception as exc:
+            logger.exception("[SSE] Stream error: %s", exc)
+            yield sse("error", {"message": str(exc)})
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
+    )
 
 
 # ── Audio / Gemini Live API ───────────────────────────────────────────────────
