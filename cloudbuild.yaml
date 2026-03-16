@@ -1,27 +1,43 @@
+substitutions:
+  _REGION: asia-southeast1
+  _REPO: sentinel
+  _SERVICE: sentinel
+  _AR_REPO: ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}
+
 steps:
   # Build the container image
   - name: 'gcr.io/cloud-builders/docker'
+    id: build
     args:
       - build
       - '-t'
-      - 'gcr.io/$PROJECT_ID/sentinel'
+      - '${_AR_REPO}/${_SERVICE}:${BUILD_ID}'
+      - '-t'
+      - '${_AR_REPO}/${_SERVICE}:latest'
+      - '--label=app=sentinel'
+      - '--label=component=backend'
       - '.'
 
-  # Push to Container Registry
+  # Push to Artifact Registry (all tags)
   - name: 'gcr.io/cloud-builders/docker'
+    id: push
+    waitFor: ['build']
     args:
       - push
-      - 'gcr.io/$PROJECT_ID/sentinel'
+      - '--all-tags'
+      - '${_AR_REPO}/${_SERVICE}'
 
   # Deploy to Cloud Run (asia-southeast1)
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    id: deploy
+    waitFor: ['push']
     entrypoint: gcloud
     args:
       - run
       - deploy
-      - sentinel
-      - '--image=gcr.io/$PROJECT_ID/sentinel'
-      - '--region=asia-southeast1'
+      - ${_SERVICE}
+      - '--image=${_AR_REPO}/${_SERVICE}:${BUILD_ID}'
+      - '--region=${_REGION}'
       - '--platform=managed'
       - '--allow-unauthenticated'
       - '--memory=2Gi'
@@ -29,4 +45,4 @@ steps:
       - '--timeout=300'
 
 images:
-  - 'gcr.io/$PROJECT_ID/sentinel'
+  - '${_AR_REPO}/${_SERVICE}'
