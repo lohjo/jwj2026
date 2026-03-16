@@ -2,7 +2,6 @@ substitutions:
   _REGION: asia-southeast1
   _REPO: sentinel
   _SERVICE: sentinel
-  _AR_REPO: ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}
 
 steps:
   # Build the container image
@@ -11,9 +10,9 @@ steps:
     args:
       - build
       - '-t'
-      - '${_AR_REPO}/${_SERVICE}:${BUILD_ID}'
+      - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_SERVICE}:${BUILD_ID}'
       - '-t'
-      - '${_AR_REPO}/${_SERVICE}:latest'
+      - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_SERVICE}:latest'
       - '--label=app=sentinel'
       - '--label=component=backend'
       - '.'
@@ -25,7 +24,7 @@ steps:
     args:
       - push
       - '--all-tags'
-      - '${_AR_REPO}/${_SERVICE}'
+      - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_SERVICE}'
 
   # Deploy to Cloud Run (asia-southeast1)
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
@@ -36,7 +35,7 @@ steps:
       - run
       - deploy
       - ${_SERVICE}
-      - '--image=${_AR_REPO}/${_SERVICE}:${BUILD_ID}'
+      - '--image=${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_SERVICE}:${BUILD_ID}'
       - '--region=${_REGION}'
       - '--platform=managed'
       - '--allow-unauthenticated'
@@ -45,4 +44,4 @@ steps:
       - '--timeout=300'
 
 images:
-  - '${_AR_REPO}/${_SERVICE}'
+  - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_SERVICE}'
