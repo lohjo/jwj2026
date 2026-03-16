@@ -29,7 +29,8 @@ async def test_falls_back_to_groq_on_gemini_exception():
     mock_completion.choices[0].message.content = "Groq response"
 
     with patch("pipeline.insights.genai") as mock_genai, \
-         patch("pipeline.insights.OpenAI") as mock_openai_cls:
+         patch("pipeline.insights.OpenAI") as mock_openai_cls, \
+         patch("pipeline.insights.GROQ_API_KEY", "test-groq-key"):
         mock_genai.Client.side_effect = RuntimeError("Gemini down")
 
         mock_client = MagicMock()

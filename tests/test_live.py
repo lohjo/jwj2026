@@ -5,6 +5,7 @@ All external API calls are mocked — no real WebSockets are opened.
 """
 
 import io
+import shutil
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -47,11 +48,15 @@ def _make_mock_session(pcm_data: bytes):
 async def test_live_voice_exchange_returns_bytes_on_success():
     """Live API returns OGG bytes when Gemini responds with PCM audio."""
     pcm_data = b"\x00\x01" * 2400  # 2400 samples of silence at 24kHz
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        pytest.skip("ffmpeg not installed")
 
     session = _make_mock_session(pcm_data)
 
     with patch("media.live.genai.Client") as mock_client_cls, \
-         patch("media.live._to_pcm", return_value=b"\x00\x00" * 1600):
+         patch("media.live._to_pcm", return_value=b"\x00\x00" * 1600), \
+         patch("media.live._ffmpeg_path", ffmpeg):
         mock_client_cls.return_value.aio.live.connect.return_value = session
 
         result = await live_voice_exchange(b"fake_audio_bytes")
@@ -132,7 +137,11 @@ def test_pcm_to_ogg_returns_empty_bytes_for_empty_input():
 def test_pcm_to_ogg_returns_ogg_bytes_for_valid_pcm():
     # 0.1 s of silence: 24000 samples/s × 0.1 × 2 bytes/sample = 4800 bytes
     silent_pcm = b"\x00\x00" * 2400
-    result = _pcm_to_ogg(silent_pcm)
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        pytest.skip("ffmpeg not installed")
+    with patch("media.live._ffmpeg_path", ffmpeg):
+        result = _pcm_to_ogg(silent_pcm)
     assert isinstance(result, bytes)
     assert len(result) > 0
     # OGG files start with "OggS" magic bytes
