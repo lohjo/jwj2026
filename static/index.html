@@ -727,7 +727,7 @@
                     <div id="raw-json-box" class="json-box" style="display:none;"></div>
                 </div>
                 <div style="display:flex; gap:0.875rem; margin-top:1.25rem; flex-wrap:wrap; align-items:center;">
-                    <button class="copy-btn" onclick="copyResults()">Copy results</button>
+                    <button class="copy-btn" onclick="copyResults(event)">Copy results</button>
                     <button class="btn btn-secondary" id="btn-research-text" style="display:none;" onclick="runResearch('text')">Research this claim</button>
                     <button class="btn btn-text" onclick="resetTextPanel()">&#x2190; New analysis</button>
                 </div>
@@ -873,7 +873,7 @@
                     <div id="image-raw-json-box" class="json-box" style="display:none;"></div>
                 </div>
                 <div style="display:flex; gap:0.875rem; margin-top:1.25rem; flex-wrap:wrap; align-items:center;">
-                    <button class="copy-btn" onclick="copyImageResults()">Copy results</button>
+                    <button class="copy-btn" onclick="copyImageResults(event)">Copy results</button>
                     <button class="btn btn-secondary" id="btn-research-image" style="display:none;" onclick="runResearch('image')">Research this claim</button>
                     <button class="btn btn-text" onclick="resetImagePanel()">&#x2190; New analysis</button>
                 </div>
@@ -1264,13 +1264,15 @@
     function toggleCard(cardId) {
         const body   = document.getElementById('body-' + cardId);
         const toggle = document.querySelector(`#${cardId} .detail-toggle`);
+        if (!body || !toggle) return;
         if (body.style.display === 'none') { body.style.display = 'block';  toggle.textContent = '\u25BE'; }
         else                               { body.style.display = 'none';   toggle.textContent = '\u25B8'; }
     }
 
     function toggleRawJson() {
         const box = document.getElementById('raw-json-box');
-        const toggle = box.previousElementSibling;
+        const toggle = box ? box.previousElementSibling : null;
+        if (!box || !toggle) return;
         if (box.style.display === 'none') { box.style.display = 'block'; toggle.innerHTML = '\u25BE Show raw JSON'; }
         else                              { box.style.display = 'none';  toggle.innerHTML = '\u25B8 Show raw JSON'; }
     }
@@ -1281,8 +1283,9 @@
         return div.innerHTML;
     }
 
-    function copyResults() {
-        const btn  = event.target.closest('.copy-btn');
+    function copyResults(clickEvent) {
+        const btn  = clickEvent?.target?.closest?.('.copy-btn');
+        if (!btn) return;
         const text = lastAnalysisResult ? JSON.stringify(lastAnalysisResult, null, 2) : '';
         navigator.clipboard.writeText(text).then(() => {
             btn.classList.add('copied');
@@ -1688,13 +1691,16 @@
     }
 
     function toggleImageRawJson() {
-        const box = document.getElementById('image-raw-json-box'), toggle = box.previousElementSibling;
+        const box = document.getElementById('image-raw-json-box');
+        const toggle = box ? box.previousElementSibling : null;
+        if (!box || !toggle) return;
         if (box.style.display==='none') { box.style.display='block'; toggle.innerHTML='\u25BE Show raw JSON'; }
         else                            { box.style.display='none';  toggle.innerHTML='\u25B8 Show raw JSON'; }
     }
 
-    function copyImageResults() {
-        const btn = event.target.closest('.copy-btn');
+    function copyImageResults(clickEvent) {
+        const btn = clickEvent?.target?.closest?.('.copy-btn');
+        if (!btn) return;
         const text = lastImageResult ? JSON.stringify(lastImageResult, null, 2) : '';
         navigator.clipboard.writeText(text).then(() => {
             btn.classList.add('copied'); btn.innerHTML = '\u2713 Copied';
@@ -1799,7 +1805,7 @@
         const transcriptEl = document.getElementById(prefix + '-transcript-text');
         const resultsEl   = document.getElementById(prefix + '-detection-results');
         const researchBtn = document.getElementById('btn-research-' + prefix);
-        if (!detailsEl) return;
+        if (!detailsEl || !verdictEl || !transcriptEl || !resultsEl) return;
 
         if (data.transcript) {
             transcriptEl.textContent = data.transcript;

@@ -45,6 +45,23 @@ def test_root_serves_html(client):
     assert "text/html" in res.headers["content-type"]
 
 
+def test_root_html_copy_buttons_pass_click_event(client):
+    """Copy button handlers pass the click event explicitly."""
+    res = client.get("/")
+    assert res.status_code == 200
+    assert 'onclick="copyResults(event)"' in res.text
+    assert 'onclick="copyImageResults(event)"' in res.text
+
+
+def test_root_html_copy_helpers_are_event_safe(client):
+    """Copy helper functions guard when click event/button is unavailable."""
+    res = client.get("/")
+    assert res.status_code == 200
+    assert "function copyResults(clickEvent)" in res.text
+    assert "function copyImageResults(clickEvent)" in res.text
+    assert "if (!btn) return;" in res.text
+
+
 # ---------------------------------------------------------------------------
 # Text detection
 # ---------------------------------------------------------------------------
