@@ -1284,7 +1284,7 @@
     }
 
     function copyResults(clickEvent) {
-        const btn  = clickEvent?.target?.closest?.('.copy-btn');
+        const btn  = clickEvent && clickEvent.target ? clickEvent.target.closest('.copy-btn') : null;
         if (!btn) return;
         const text = lastAnalysisResult ? JSON.stringify(lastAnalysisResult, null, 2) : '';
         navigator.clipboard.writeText(text).then(() => {
@@ -1699,7 +1699,7 @@
     }
 
     function copyImageResults(clickEvent) {
-        const btn = clickEvent?.target?.closest?.('.copy-btn');
+        const btn = clickEvent && clickEvent.target ? clickEvent.target.closest('.copy-btn') : null;
         if (!btn) return;
         const text = lastImageResult ? JSON.stringify(lastImageResult, null, 2) : '';
         navigator.clipboard.writeText(text).then(() => {
