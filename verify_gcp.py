@@ -1,3 +1,7 @@
+# NOTE: This script is a standalone hackathon/verification tool and is an intentional
+# exception to the project convention that only config.py may call os.getenv().
+# If this script is promoted to production use, refactor it to import configuration
+# values from config.py instead of calling os.getenv() directly.
 """
 verify_gcp.py — Demonstrates Google Cloud service usage for hackathon proof.
 
