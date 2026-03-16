@@ -45,6 +45,37 @@ def test_root_serves_html(client):
     assert "text/html" in res.headers["content-type"]
 
 
+def test_root_html_copy_buttons_pass_click_event(client):
+    """Copy button handlers pass the click event explicitly."""
+    res = client.get("/")
+    assert res.status_code == 200
+    assert 'onclick="copyResults(event)"' in res.text
+    assert 'onclick="copyImageResults(event)"' in res.text
+
+
+def test_root_html_copy_helpers_are_event_safe(client):
+    """Copy helper functions guard when click event/button is unavailable."""
+    res = client.get("/")
+    assert res.status_code == 200
+    # Ensure helper function declarations exist
+    assert "function copyResults(clickEvent)" in res.text
+    assert "function copyImageResults(clickEvent)" in res.text
+
+    # The "if (!btn) return;" guard must be present within or after copyResults
+    copy_results_start = res.text.index("function copyResults(clickEvent)")
+    assert "if (!btn) return;" in res.text[copy_results_start:]
+
+    # The "if (!body || !toggle) return;" guard should still exist somewhere
+    assert "if (!body || !toggle) return;" in res.text
+
+    # The image JSON toggle helper must exist and contain its specific guard
+    assert "function toggleImageRawJson(" in res.text
+    toggle_image_raw_start = res.text.index("function toggleImageRawJson(")
+    assert "if (!box || !toggle) return;" in res.text[toggle_image_raw_start:]
+
+    assert "if (!detailsEl || !verdictEl || !transcriptEl || !resultsEl) return;" in res.text
+
+
 # ---------------------------------------------------------------------------
 # Text detection
 # ---------------------------------------------------------------------------
@@ -162,6 +193,33 @@ def test_analyse_stream_unsafe_content(client):
     assert res.status_code == 200
     body = res.text
     assert '"is_safe": false' in body
+
+
+def test_predict_stream_returns_sse_events(client):
+    """POST /predict-stream returns SSE events for prediction steps."""
+    res = client.post(
+        "/predict-stream",
+        json={"text": "MOH announcement: cases rising. Please share."},
+    )
+
+    assert res.status_code == 200
+    assert "text/event-stream" in res.headers["content-type"]
+    body = res.text
+
+    assert "event: step" in body
+    assert "event: source" in body
+    assert "event: result" in body
+    assert '"id": "topics"' in body
+    assert '"id": "sources"' in body
+    assert '"id": "analyze"' in body
+    assert '"predictions"' in body
+
+
+def test_predict_stream_empty_text_returns_400(client):
+    """Prediction SSE endpoint rejects empty text."""
+    res = client.post("/predict-stream", json={"text": ""})
+    assert res.status_code == 400
+    assert "error" in res.json()
 
 
 # ---------------------------------------------------------------------------

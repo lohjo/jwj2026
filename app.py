@@ -3,8 +3,10 @@ app.py — FastAPI web server for SENTINEL detection pipeline.
 
 Serves the web interface (static/index.html) and provides REST + WebSocket
 endpoints for text, image, audio (Gemini Live API), and video analysis.
+On startup, also launches the Telegram bot poller in a background thread.
 """
 
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, UploadFile, File, Form, Query, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse, HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -20,9 +22,19 @@ import json
 from pipeline.detector import run_full_detection, detect_misinformation
 from pipeline.guard import run_guard_detection
 from pipeline.insights import run_insights
-from media.live import live_voice_exchange
+from pipeline.translator import detect_language, translate_to_english, translate_from_english
+from pipeline.formatter import format_detection_message
+from pipeline.predict_demo import get_demo_prediction
 
 # Optional media modules — may fail if dependencies are missing
+try:
+    from media.live import live_voice_exchange, InterruptibleLiveSession, _to_pcm, _pcm_to_ogg
+except Exception:
+    live_voice_exchange = None
+    InterruptibleLiveSession = None
+    _to_pcm = None
+    _pcm_to_ogg = None
+
 try:
     from media.image import extract_text_from_image, detect_image_manipulation, analyse_image_with_gemini
 except Exception:
@@ -48,10 +60,25 @@ AUDIO_MIME_TYPES = {
     ".webm": "audio/webm", ".mp4": "audio/mp4", ".m4a": "audio/mp4",
 }
 
+
+@asynccontextmanager
+async def lifespan(application: FastAPI):
+    """Start the Telegram bot poller when FastAPI starts up."""
+    try:
+        from telegram_bot import start_bot_background
+        start_bot_background()
+    except Exception as exc:
+        logging.getLogger(__name__).warning(
+            "Telegram bot failed to start: %s — web server will continue without it", exc
+        )
+    yield
+
+
 app = FastAPI(
     title="SENTINEL — AI Content Detection",
     description="Multimodal AI content detection: text, image, audio (Gemini Live API), and video analysis.",
     version="2.0.0",
+    lifespan=lifespan,
 )
 
 UPLOAD_FOLDER = "uploads"
@@ -228,6 +255,10 @@ class AnalyseStreamRequest(BaseModel):
     text: str
 
 
+class PredictStreamRequest(BaseModel):
+    text: str
+
+
 @app.post("/analyse-stream")
 async def analyse_stream(body: AnalyseStreamRequest):
     """
@@ -252,11 +283,23 @@ async def analyse_stream(body: AnalyseStreamRequest):
             return f"event: {event}\ndata: {json.dumps(data)}\n\n"
 
         try:
+            # Step 0: Language detection and translation
+            source_lang = detect_language(text) if len(text) >= 20 else "en"
+            english_text = text
+            if source_lang != "en":
+                yield sse("step", {"id": "translate", "status": "running", "data": {"source_lang": source_lang}})
+                try:
+                    english_text = await translate_to_english(text, source_lang)
+                except Exception as exc:
+                    logger.warning("[SSE] Translation failed: %s", exc)
+                    english_text = text
+                yield sse("step", {"id": "translate", "status": "done", "data": {"source_lang": source_lang, "translated": source_lang != "en"}})
+
             # Step 1: GUARD detection
             yield sse("step", {"id": "guard", "status": "running"})
             try:
                 guard_result = await run_guard_detection(
-                    text, content_type="text", source_lang="en"
+                    english_text, content_type="text", source_lang=source_lang
                 )
             except Exception as exc:
                 logger.exception("[SSE] GUARD detection failed: %s", exc)
@@ -272,7 +315,7 @@ async def analyse_stream(body: AnalyseStreamRequest):
             yield sse("step", {"id": "misinfo", "status": "running"})
             try:
                 misinfo_result = await detect_misinformation(
-                    text, context_description="text"
+                    english_text, context_description="text"
                 )
             except Exception as exc:
                 logger.exception("[SSE] Misinfo detection failed: %s", exc)
@@ -288,12 +331,26 @@ async def analyse_stream(body: AnalyseStreamRequest):
             yield sse("step", {"id": "insights", "status": "running"})
             try:
                 insights_result = await run_insights(
-                    text, guard_result, misinformation_result=misinfo_result
+                    english_text, guard_result, misinformation_result=misinfo_result
                 )
             except Exception as exc:
                 logger.exception("[SSE] Insights failed: %s", exc)
                 insights_result = {}
             yield sse("step", {"id": "insights", "status": "done", "data": insights_result})
+
+            # Step 4: Translate explanation back to source language
+            explanation = (insights_result or {}).get("explanation", "")
+            misinfo_explanation = misinfo_result.get("explanation", "")
+            if source_lang != "en":
+                try:
+                    if explanation:
+                        translated_explanation = await translate_from_english(explanation, source_lang)
+                        insights_result = {**insights_result, "explanation": translated_explanation, "original_explanation": explanation}
+                    if misinfo_explanation and misinfo_explanation != "Unavailable.":
+                        translated_misinfo = await translate_from_english(misinfo_explanation, source_lang)
+                        misinfo_result = {**misinfo_result, "explanation": translated_misinfo, "original_explanation": misinfo_explanation}
+                except Exception as exc:
+                    logger.warning("[SSE] Translation back failed: %s", exc)
 
             # Compute combined verdict
             guard_safe = guard_result.get("is_safe")
@@ -314,12 +371,80 @@ async def analyse_stream(body: AnalyseStreamRequest):
                 "insights_result": insights_result,
                 "is_safe": combined_is_safe,
                 "misinfo_type": misinfo_result.get("misinformation_type", "none"),
+                "source_lang": source_lang,
             }
 
             yield sse("result", full_result)
 
         except Exception as exc:
             logger.exception("[SSE] Stream error: %s", exc)
+            yield sse("error", {"message": str(exc)})
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
+    )
+
+
+# ── Proactive Prediction (demo SSE streaming) ───────────────────────────────
+
+
+@app.post("/predict-stream")
+async def predict_stream(body: PredictStreamRequest):
+    """Demo rumour prediction stream following the ContextGuard SSE pattern."""
+    text = body.text
+    if not text or not text.strip():
+        return JSONResponse(status_code=400, content={"error": "Text is required"})
+
+    async def generate():
+        def sse(event: str, data: dict) -> str:
+            return f"event: {event}\ndata: {json.dumps(data)}\n\n"
+
+        try:
+            payload = get_demo_prediction(text)
+            topics = payload.get("topics") or {}
+            sources = payload.get("sources") or []
+
+            yield sse("step", {"id": "topics", "status": "running"})
+            yield sse("step", {"id": "topics", "status": "done", "data": topics})
+
+            yield sse("step", {"id": "sources", "status": "running"})
+            for src in sources:
+                try:
+                    url = (src or {}).get("url", "")
+                    domain = ""
+                    if url:
+                        try:
+                            domain = url.split("//", 1)[1].split("/", 1)[0]
+                        except Exception:
+                            domain = ""
+                    yield sse(
+                        "source",
+                        {
+                            "label": (src or {}).get("label", "Source"),
+                            "url": url,
+                            "domain": domain,
+                        },
+                    )
+                except Exception:
+                    continue
+            yield sse("step", {"id": "sources", "status": "done"})
+
+            yield sse("step", {"id": "analyze", "status": "running"})
+            yield sse("step", {"id": "analyze", "status": "done"})
+
+            result = {
+                "topics": topics,
+                "predictions": payload.get("predictions", []),
+                "historicalPatterns": payload.get("historicalPatterns", []),
+                "communityLeadersCount": payload.get("communityLeadersCount", 0),
+                "constituencies": payload.get("constituencies", []),
+                "sources": sources,
+            }
+            yield sse("result", result)
+        except Exception as exc:
+            logger.exception("[Predict SSE] Stream error: %s", exc)
             yield sse("error", {"message": str(exc)})
 
     return StreamingResponse(
@@ -641,6 +766,132 @@ async def websocket_live_audio(websocket: WebSocket):
             await websocket.send_json({"error": str(e)})
         except Exception:
             pass
+
+
+# ── WebSocket — Live Agent (bidirectional streaming with interruption) ────────
+
+@app.websocket("/ws/live-agent")
+async def websocket_live_agent(websocket: WebSocket):
+    """
+    Bidirectional streaming Live Agent using InterruptibleLiveSession.
+
+    Protocol:
+    - Client sends binary frames: raw PCM16 mono 16kHz audio chunks
+    - Client sends JSON: {"type":"text","content":"..."} for text input
+    - Client sends JSON: {"type":"image","content":"<base64>","mime_type":"image/jpeg"}
+    - Client sends JSON: {"type":"end_turn"} when user stops speaking
+    - Client sends JSON: {"type":"webm_audio","content":"<base64>"} for WebM audio
+    - Server sends binary frames: PCM16 audio chunks from model
+    - Server sends JSON: {"type":"turn_start"} when model starts speaking
+    - Server sends JSON: {"type":"turn_end"} when model finishes
+    - Server sends JSON: {"type":"interrupted"} when model is interrupted
+    - Server sends JSON: {"type":"connected"} when session is ready
+    - Server sends JSON: {"type":"error","message":"..."} on error
+    """
+    await websocket.accept()
+    session: InterruptibleLiveSession | None = None
+    response_task: asyncio.Task | None = None
+
+    async def stream_responses():
+        """Forward model audio chunks to the WebSocket client."""
+        try:
+            while session and not session._closed:
+                async for chunk in session.receive_audio():
+                    try:
+                        await websocket.send_json({"type": "turn_start"})
+                        # Convert PCM chunk to base64 for JSON transport
+                        await websocket.send_json({
+                            "type": "audio",
+                            "data": base64.b64encode(chunk).decode("utf-8"),
+                        })
+                    except Exception:
+                        return
+                try:
+                    if session.is_model_speaking:
+                        await websocket.send_json({"type": "interrupted"})
+                    else:
+                        await websocket.send_json({"type": "turn_end"})
+                except Exception:
+                    return
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logger.warning("[Live Agent WS] Response stream error: %s", e)
+
+    try:
+        session = InterruptibleLiveSession(
+            system_context="You are SENTINEL, an AI content detection assistant. "
+            "Help users analyse text, images, and audio for AI generation, "
+            "misinformation, and manipulation. Speak naturally and concisely."
+        )
+        await session.connect()
+        await websocket.send_json({"type": "connected"})
+
+        response_task = asyncio.create_task(stream_responses())
+
+        while True:
+            message = await websocket.receive()
+
+            if message.get("type") == "websocket.disconnect":
+                break
+
+            if "bytes" in message:
+                # Raw PCM16 audio chunk from client mic
+                await session.send_audio(message["bytes"])
+
+            elif "text" in message:
+                try:
+                    data = json.loads(message["text"])
+                except (json.JSONDecodeError, TypeError):
+                    continue
+
+                msg_type = data.get("type", "")
+
+                if msg_type == "text":
+                    content = data.get("content", "").strip()
+                    if content:
+                        await session.send_text(content)
+
+                elif msg_type == "image":
+                    img_b64 = data.get("content", "")
+                    mime = data.get("mime_type", "image/jpeg")
+                    if img_b64:
+                        img_bytes = base64.b64decode(img_b64)
+                        await session.send_image(img_bytes, mime)
+
+                elif msg_type == "end_turn":
+                    await session.end_turn()
+
+                elif msg_type == "webm_audio":
+                    # Client sent WebM-encoded audio — convert to PCM
+                    audio_b64 = data.get("content", "")
+                    if audio_b64:
+                        webm_bytes = base64.b64decode(audio_b64)
+                        pcm = _to_pcm(webm_bytes, "audio/webm")
+                        if pcm:
+                            # Send in chunks to enable interruption
+                            chunk_size = 3200  # 100ms at 16kHz mono
+                            for i in range(0, len(pcm), chunk_size):
+                                await session.send_audio(pcm[i:i + chunk_size])
+                                await asyncio.sleep(0.02)
+
+    except WebSocketDisconnect:
+        logger.info("[Live Agent WS] Client disconnected")
+    except Exception as e:
+        logger.exception("[Live Agent WS] Error: %s", e)
+        try:
+            await websocket.send_json({"type": "error", "message": str(e)})
+        except Exception:
+            pass
+    finally:
+        if response_task and not response_task.done():
+            response_task.cancel()
+            try:
+                await response_task
+            except (asyncio.CancelledError, Exception):
+                pass
+        if session:
+            await session.close()
 
 
 # ── Research Agent ────────────────────────────────────────────────────────────

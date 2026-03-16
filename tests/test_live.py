@@ -23,18 +23,26 @@ async def _async_iter(items):
 
 
 def _make_mock_session(pcm_data: bytes):
-    """Return a mock session that yields a single audio message."""
+    """Return a mock session that yields a single audio message then turn_complete."""
     part = MagicMock()
     part.inline_data = MagicMock()
     part.inline_data.data = pcm_data
 
-    message = MagicMock()
-    message.server_content = MagicMock()
-    message.server_content.model_turn = MagicMock()
-    message.server_content.model_turn.parts = [part]
+    audio_msg = MagicMock()
+    audio_msg.server_content = MagicMock()
+    audio_msg.server_content.model_turn = MagicMock()
+    audio_msg.server_content.model_turn.parts = [part]
+    audio_msg.server_content.interrupted = False
+    audio_msg.server_content.turn_complete = False
+
+    end_msg = MagicMock()
+    end_msg.server_content = MagicMock()
+    end_msg.server_content.model_turn = None
+    end_msg.server_content.interrupted = False
+    end_msg.server_content.turn_complete = True
 
     session = AsyncMock()
-    session.receive = MagicMock(return_value=_async_iter([message]))
+    session.receive = MagicMock(return_value=_async_iter([audio_msg, end_msg]))
     session.__aenter__ = AsyncMock(return_value=session)
     session.__aexit__ = AsyncMock(return_value=False)
     return session
@@ -112,6 +120,8 @@ async def test_live_voice_exchange_returns_empty_bytes_on_empty_pcm():
     message.server_content = MagicMock()
     message.server_content.model_turn = MagicMock()
     message.server_content.model_turn.parts = []
+    message.server_content.interrupted = False
+    message.server_content.turn_complete = True
 
     session = AsyncMock()
     session.receive = MagicMock(return_value=_async_iter([message]))

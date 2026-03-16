@@ -1,0 +1,108 @@
+[Skip to main content](https://pmc.ncbi.nlm.nih.gov/articles/PMC9916720/#main-content)
+
+![](https://cdn.ncbi.nlm.nih.gov/pmc/pd-medc-pmc-cloudpmc-viewer/production/a2b04810/var/data/static/img/icon-dot-gov.svg)
+
+**Official websites use .gov**
+
+A
+**.gov** website belongs to an official
+government organization in the United States.
+
+
+![](https://cdn.ncbi.nlm.nih.gov/pmc/pd-medc-pmc-cloudpmc-viewer/production/a2b04810/var/data/static/img/icon-https.svg)
+
+**Secure .gov websites use HTTPS**
+
+A **lock** (
+Lock
+Locked padlock icon
+) or **https://** means you've safely
+connected to the .gov website. Share sensitive
+information only on official, secure websites.
+
+
+[Home](https://pmc.ncbi.nlm.nih.gov/ "Home")
+
+![PMC search open icon](https://cdn.ncbi.nlm.nih.gov/pmc/pd-medc-pmc-cloudpmc-viewer/production/a2b04810/var/data/static/img/search.svg)![PMC search close ison](https://cdn.ncbi.nlm.nih.gov/pmc/pd-medc-pmc-cloudpmc-viewer/production/a2b04810/var/data/static/img/close.svg)
+
+Search PMC Full-Text Archive
+
+Search in PMC![Search](https://cdn.ncbi.nlm.nih.gov/pmc/pd-medc-pmc-cloudpmc-viewer/production/a2b04810/var/data/static/img/usa-icons-bg/search--white.svg)
+
+- [Journal List](https://pmc.ncbi.nlm.nih.gov/journals/)
+- [User Guide](https://pmc.ncbi.nlm.nih.gov/about/userguide/)
+
+- ![Open resources icon](https://cdn.ncbi.nlm.nih.gov/pmc/pd-medc-pmc-cloudpmc-viewer/production/a2b04810/var/data/static/img/more_vert.svg)
+- [![View on publisher site icon](https://cdn.ncbi.nlm.nih.gov/pmc/pd-medc-pmc-cloudpmc-viewer/production/a2b04810/var/data/static/img/launch.svg)](https://doi.org/10.3390/ijms24032706) View on publisher site
+- [![Download PDF icon](https://cdn.ncbi.nlm.nih.gov/pmc/pd-medc-pmc-cloudpmc-viewer/production/a2b04810/var/data/static/img/file_download.svg)](https://pmc.ncbi.nlm.nih.gov/articles/PMC9916720/pdf/ijms-24-02706.pdf) Download PDF
+- ![Collections icon](https://cdn.ncbi.nlm.nih.gov/pmc/pd-medc-pmc-cloudpmc-viewer/production/a2b04810/var/data/static/img/action-bookmark-full.svg)![Collections icon](https://cdn.ncbi.nlm.nih.gov/pmc/pd-medc-pmc-cloudpmc-viewer/production/a2b04810/var/data/static/img/action-bookmark-empty.svg)Add to Collections
+- ![Cite icon](https://cdn.ncbi.nlm.nih.gov/pmc/pd-medc-pmc-cloudpmc-viewer/production/a2b04810/var/data/static/img/format_quote.svg)Cite
+- ![Show article permalink icon](https://cdn.ncbi.nlm.nih.gov/pmc/pd-medc-pmc-cloudpmc-viewer/production/a2b04810/var/data/static/img/share.svg)Permalink
+
+
+
+
+## PERMALINK
+
+
+
+![Copy icon](https://cdn.ncbi.nlm.nih.gov/pmc/pd-medc-pmc-cloudpmc-viewer/production/a2b04810/var/data/static/img/content_copy.svg)Copy
+
+
+![Open article navigation icon](https://cdn.ncbi.nlm.nih.gov/pmc/pd-medc-pmc-cloudpmc-viewer/production/a2b04810/var/data/static/img/list.svg)
+
+As a library, NLM provides access to scientific literature. Inclusion in an NLM database does not imply endorsement of, or agreement with,
+the contents by NLM or the National Institutes of Health.
+
+Learn more:
+[PMC Disclaimer](https://pmc.ncbi.nlm.nih.gov/about/disclaimer/)
+\|
+[PMC Copyright Notice](https://pmc.ncbi.nlm.nih.gov/about/copyright/)
+
+![International Journal of Molecular Sciences logo](https://cdn.ncbi.nlm.nih.gov/pmc/banners/logo-ijms.png)
+
+Int J Mol Sci
+
+. 2023 Jan 31;24(3):2706. doi: [10.3390/ijms24032706](https://doi.org/10.3390/ijms24032706)
+
+# Health Benefits of Coffee Consumption for Cancer and Other Diseases and Mechanisms of Action
+
+[Stephen Safe](https://pubmed.ncbi.nlm.nih.gov/?term=%22Safe%20S%22[Author])
+
+### Stephen Safe
+
+1Department of Veterinary Physiology and Pharmacology, Texas A&M University, College Station, TX 77843, USA
+
+Find articles by [Stephen Safe](https://pubmed.ncbi.nlm.nih.gov/?term=%22Safe%20S%22[Author])
+
+1,\*, [Jainish Kothari](https://pubmed.ncbi.nlm.nih.gov/?term=%22Kothari%20J%22[Author])
+
+### Jainish Kothari
+
+2Master of Biotechnology Program, Texas A&M University, College Station, TX 77843, USA
+
+Find articles by [Jainish Kothari](https://pubmed.ncbi.nlm.nih.gov/?term=%22Kothari%20J%22[Author])
+
+2, [Amanuel Hailemariam](https://pubmed.ncbi.nlm.nih.gov/?term=%22Hailemariam%20A%22[Author])
+
+### Amanuel Hailemariam
+
+1Department of Veterinary Physiology and Pharmacology, Texas A&M University, College Station, TX 77843, USA
+
+Find articles by [Amanuel Hailemariam](https://pubmed.ncbi.nlm.nih.gov/?term=%22Hailemariam%20A%22[Author])
+
+1, [Srijana Upadhyay](https://pubmed.ncbi.nlm.nih.gov/?term=%22Upadhyay%20S%22[Author])
+
+### Srijana Upadhyay
+
+1Department of Veterinary Physiology and Pharmacology, Texas A&M University, College Station, TX 77843, USA
+
+Find articles by [Srijana Upadhyay](https://pubmed.ncbi.nlm.nih.gov/?term=%22Upadhyay%20S%22[Author])
+
+1, [Laurie A Davidson](https://pubmed.ncbi.nlm.nih.gov/?term=%22Davidson%20LA%22[Author])
+
+### Laurie A Davidson
+
+3Program in Integrative Nutrition and Complex Diseases, Department of Nutrition, Texas A&M University, College Station, TX 77843, USA
+
+Find articles by [Laurie A Davidson](https://pubm

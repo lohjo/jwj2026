@@ -13,7 +13,8 @@ async def test_returns_gemini_response_on_success():
     mock_client = MagicMock()
     mock_client.models.generate_content.return_value = mock_response
 
-    with patch("pipeline.insights.genai") as mock_genai:
+    with patch("pipeline.insights.genai") as mock_genai, \
+         patch("pipeline.insights.GEMINI_API_KEY", "test-gemini-key"):
         mock_genai.Client.return_value = mock_client
 
         from pipeline.insights import call_llm
@@ -81,7 +82,8 @@ async def test_llm_used_gemini_value():
     mock_client = MagicMock()
     mock_client.models.generate_content.return_value = mock_response
 
-    with patch("pipeline.insights.genai") as mock_genai:
+    with patch("pipeline.insights.genai") as mock_genai, \
+         patch("pipeline.insights.GEMINI_API_KEY", "test-gemini-key"):
         mock_genai.Client.return_value = mock_client
 
         from pipeline.insights import call_llm

@@ -3,14 +3,21 @@ media/live.py — Gemini Live API: bidirectional audio (STT + TTS in one WebSock
 
 Primary audio path for SENTINEL. Replaces ElevenLabs TTS for voice replies.
 Falls back gracefully to b"" on any failure — never raises into the caller.
+
+Supports two modes:
+1. live_voice_exchange() — batch: send audio → receive spoken verdict (Telegram)
+2. InterruptibleLiveSession — streaming: real-time send/receive with
+   interruption support (WebSocket dashboard)
 """
 
+import asyncio
 import io
 import logging
 import os
 import shutil
 import subprocess
 import tempfile
+from typing import AsyncGenerator
 
 from google import genai
 from google.genai import types
@@ -18,6 +25,10 @@ from google.genai import types
 from config import GEMINI_API_KEY, GEMINI_LIVE_MODEL, GEMINI_LIVE_VOICE
 
 logger = logging.getLogger(__name__)
+
+# 100ms of PCM16 mono 16kHz = 3200 bytes per chunk
+_CHUNK_SIZE = 3200
+_CHUNK_INTERVAL = 0.1
 
 # Cache ffmpeg availability check
 _ffmpeg_path: str | None = shutil.which("ffmpeg")
@@ -69,26 +80,7 @@ async def live_voice_exchange(
             logger.warning("[Live API] Could not convert input audio to PCM")
             return b""
 
-        config = types.LiveConnectConfig(
-            response_modalities=["AUDIO"],
-            speech_config=types.SpeechConfig(
-                voice_config=types.VoiceConfig(
-                    prebuilt_voice_config=types.PrebuiltVoiceConfig(
-                        voice_name=GEMINI_LIVE_VOICE
-                    )
-                )
-            ),
-            system_instruction=types.Content(
-                parts=[
-                    types.Part(
-                        text=SENTINEL_LIVE_PERSONA.format(
-                            detection_context=system_context
-                            or "No prior detection context."
-                        )
-                    )
-                ]
-            ),
-        )
+        config = _build_live_config(system_context)
 
         logger.info("[Live API] Session opened — model=%s", GEMINI_LIVE_MODEL)
 
@@ -96,9 +88,16 @@ async def live_voice_exchange(
             model=GEMINI_LIVE_MODEL,
             config=config,
         ) as session:
-            await session.send_realtime_input(
-                audio=types.Blob(data=pcm_input, mime_type="audio/pcm;rate=16000")
-            )
+            # Stream audio in chunks to enable real-time processing
+            for i in range(0, len(pcm_input), _CHUNK_SIZE):
+                chunk = pcm_input[i : i + _CHUNK_SIZE]
+                await session.send_realtime_input(
+                    audio=types.Blob(
+                        data=chunk, mime_type="audio/pcm;rate=16000"
+                    )
+                )
+                await asyncio.sleep(_CHUNK_INTERVAL)
+
             await session.send_client_content(
                 turns=types.Content(
                     parts=[types.Part(text=".")]
@@ -108,13 +107,17 @@ async def live_voice_exchange(
 
             pcm_audio = b""
             async for message in session.receive():
-                if (
-                    message.server_content
-                    and message.server_content.model_turn
-                ):
+                if not message.server_content:
+                    continue
+                if message.server_content.interrupted:
+                    logger.info("[Live API] Model turn interrupted")
+                    break
+                if message.server_content.model_turn:
                     for part in message.server_content.model_turn.parts:
                         if part.inline_data:
                             pcm_audio += part.inline_data.data
+                if message.server_content.turn_complete:
+                    break
 
         logger.info("[Live API] Received %d bytes PCM audio", len(pcm_audio))
 
@@ -255,3 +258,223 @@ def _to_pcm(audio_bytes: bytes, mime_type: str) -> bytes:
     except Exception as e:
         logger.error("[Live API] Input audio conversion failed: %s", e)
         return b""
+
+
+# ---------------------------------------------------------------------------
+# InterruptibleLiveSession — real-time streaming with interruption support
+# ---------------------------------------------------------------------------
+
+
+def _build_live_config(system_context: str = "") -> types.LiveConnectConfig:
+    """Build a LiveConnectConfig shared by batch and streaming modes."""
+    return types.LiveConnectConfig(
+        response_modalities=["AUDIO"],
+        speech_config=types.SpeechConfig(
+            voice_config=types.VoiceConfig(
+                prebuilt_voice_config=types.PrebuiltVoiceConfig(
+                    voice_name=GEMINI_LIVE_VOICE
+                )
+            )
+        ),
+        system_instruction=types.Content(
+            parts=[
+                types.Part(
+                    text=SENTINEL_LIVE_PERSONA.format(
+                        detection_context=system_context
+                        or "No prior detection context."
+                    )
+                )
+            ]
+        ),
+    )
+
+
+class InterruptibleLiveSession:
+    """Gemini Live API session with real-time interruption support.
+
+    Designed for the WebSocket dashboard where audio chunks arrive
+    continuously and the user can interrupt the model mid-response
+    by speaking again.
+
+    Usage::
+
+        async with InterruptibleLiveSession(system_context="...") as session:
+            # Send audio chunks as they arrive from the mic
+            await session.send_audio(pcm_chunk)
+
+            # Signal user finished speaking
+            await session.end_turn()
+
+            # Stream response audio back to the client
+            async for audio_chunk in session.receive_audio():
+                ws.send_bytes(audio_chunk)
+
+            # User speaks again → model is interrupted automatically
+            await session.send_audio(new_pcm_chunk)
+    """
+
+    def __init__(self, system_context: str = "") -> None:
+        self._system_context = system_context
+        self._session: object | None = None
+        self._ctx: object | None = None
+        self._client: genai.Client | None = None
+        self._response_queue: asyncio.Queue[bytes | None] = asyncio.Queue()
+        self._receive_task: asyncio.Task | None = None
+        self._closed = False
+        self._model_speaking = False
+
+    async def __aenter__(self) -> "InterruptibleLiveSession":
+        await self.connect()
+        return self
+
+    async def __aexit__(self, *exc: object) -> None:
+        await self.close()
+
+    async def connect(self) -> None:
+        """Open the WebSocket connection and start the background receiver."""
+        self._client = genai.Client(api_key=GEMINI_API_KEY)
+        config = _build_live_config(self._system_context)
+        self._ctx = self._client.aio.live.connect(
+            model=GEMINI_LIVE_MODEL, config=config
+        )
+        self._session = await self._ctx.__aenter__()
+        self._receive_task = asyncio.create_task(self._receive_loop())
+        logger.info(
+            "[Live API] Interruptible session opened — model=%s",
+            GEMINI_LIVE_MODEL,
+        )
+
+    async def send_audio(self, pcm_chunk: bytes) -> None:
+        """Send a PCM16 audio chunk. Interrupts the model if it is speaking."""
+        if self._closed or not self._session:
+            return
+        try:
+            await self._session.send_realtime_input(
+                audio=types.Blob(
+                    data=pcm_chunk, mime_type="audio/pcm;rate=16000"
+                )
+            )
+        except Exception as e:
+            logger.warning("[Live API] send_audio failed: %s", e)
+
+    async def send_text(self, text: str) -> None:
+        """Send a text message to the model."""
+        if self._closed or not self._session:
+            return
+        try:
+            await self._session.send_client_content(
+                turns=types.Content(parts=[types.Part(text=text)]),
+                turn_complete=True,
+            )
+        except Exception as e:
+            logger.warning("[Live API] send_text failed: %s", e)
+
+    async def send_image(self, image_bytes: bytes, mime_type: str = "image/jpeg") -> None:
+        """Send an image to the model for analysis."""
+        if self._closed or not self._session:
+            return
+        try:
+            await self._session.send_client_content(
+                turns=types.Content(
+                    parts=[
+                        types.Part(
+                            inline_data=types.Blob(
+                                data=image_bytes, mime_type=mime_type
+                            )
+                        ),
+                        types.Part(
+                            text="Analyse this image for signs of AI generation or manipulation."
+                        ),
+                    ]
+                ),
+                turn_complete=True,
+            )
+        except Exception as e:
+            logger.warning("[Live API] send_image failed: %s", e)
+
+    async def end_turn(self) -> None:
+        """Signal that the user has finished speaking."""
+        if self._closed or not self._session:
+            return
+        try:
+            await self._session.send_client_content(
+                turns=types.Content(parts=[types.Part(text=".")]),
+                turn_complete=True,
+            )
+        except Exception as e:
+            logger.warning("[Live API] end_turn failed: %s", e)
+
+    async def receive_audio(self) -> AsyncGenerator[bytes, None]:
+        """Yield PCM16 audio chunks as the model speaks.
+
+        Terminates when the model finishes its turn or is interrupted.
+        Can be called again for the next turn.
+        """
+        while True:
+            try:
+                chunk = await asyncio.wait_for(
+                    self._response_queue.get(), timeout=30.0
+                )
+            except asyncio.TimeoutError:
+                logger.warning("[Live API] receive_audio timed out")
+                return
+            if chunk is None:
+                return
+            yield chunk
+
+    @property
+    def is_model_speaking(self) -> bool:
+        """True while the model is actively generating audio."""
+        return self._model_speaking
+
+    async def _receive_loop(self) -> None:
+        """Background task reading from the Live API WebSocket."""
+        try:
+            async for message in self._session.receive():
+                if self._closed:
+                    break
+                if not message.server_content:
+                    continue
+
+                # Interruption: user sent new audio while model was speaking
+                if message.server_content.interrupted:
+                    logger.info("[Live API] Model interrupted by user")
+                    self._model_speaking = False
+                    await self._response_queue.put(None)
+                    continue
+
+                if message.server_content.model_turn:
+                    self._model_speaking = True
+                    for part in message.server_content.model_turn.parts:
+                        if part.inline_data:
+                            await self._response_queue.put(
+                                part.inline_data.data
+                            )
+
+                if message.server_content.turn_complete:
+                    self._model_speaking = False
+                    await self._response_queue.put(None)
+        except Exception as e:
+            if not self._closed:
+                logger.warning("[Live API] receive_loop error: %s", e)
+        finally:
+            self._model_speaking = False
+            await self._response_queue.put(None)
+
+    async def close(self) -> None:
+        """Close the session and cancel the background receiver."""
+        if self._closed:
+            return
+        self._closed = True
+        if self._receive_task and not self._receive_task.done():
+            self._receive_task.cancel()
+            try:
+                await self._receive_task
+            except (asyncio.CancelledError, Exception):
+                pass
+        if self._ctx:
+            try:
+                await self._ctx.__aexit__(None, None, None)
+            except Exception:
+                pass
+        logger.info("[Live API] Interruptible session closed")
