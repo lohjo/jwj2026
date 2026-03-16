@@ -686,10 +686,13 @@ class _HealthHandler(BaseHTTPRequestHandler):
 def _start_health_server():
     """Start a minimal HTTP server on PORT for Cloud Run health checks."""
     port = int(os.environ.get("PORT", "8080"))
-    server = HTTPServer(("0.0.0.0", port), _HealthHandler)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    logger.info("Health check server listening on port %d", port)
+    try:
+        server = HTTPServer(("0.0.0.0", port), _HealthHandler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        logger.info("Health check server listening on port %d", port)
+    except OSError as exc:
+        logger.warning("Health check server could not bind to port %d: %s", port, exc)
 
 
 # ── Bot startup ───────────────────────────────────────────────────────
