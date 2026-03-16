@@ -161,11 +161,12 @@ gcloud config set project YOUR_PROJECT_ID
 gcloud config set run/region asia-southeast1
 
 # Enable required APIs
-gcloud services enable \
-  run.googleapis.com \
-  cloudbuild.googleapis.com \
-  artifactregistry.googleapis.com \
-  aiplatform.googleapis.com
+gcloud services enable 
+ run.googleapis.com
+ cloudbuild.googleapis.com
+ artifactregistry.googleapis.com
+ aiplatform.googleapis.com
+  --project jwjbot
 ```
 
 ### Deploy (build + push + deploy in one command)
