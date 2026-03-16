@@ -741,7 +741,8 @@ def start_bot_background():
     def _run():
         bot_app = _build_app()
         logger.info("Starting Telegram bot polling (background thread)...")
-        bot_app.run_polling(bootstrap_retries=5)
+        # PTB installs signal handlers by default; disable them in non-main threads.
+        bot_app.run_polling(bootstrap_retries=5, stop_signals=None)
 
     thread = threading.Thread(target=_run, daemon=True)
     thread.start()
