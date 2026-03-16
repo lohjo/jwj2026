@@ -21,10 +21,10 @@ COPY . .
 RUN useradd -m appuser && chown -R appuser /app
 USER appuser
 
-# Cloud Run injects PORT; telegram_bot.py uses polling, not HTTP
+# Cloud Run injects PORT; serve the web UI via uvicorn (FastAPI)
 ENV PORT=8080
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD ["python", "-c", "import sys; sys.exit(0)"]
+    CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
 
-CMD ["python", "telegram_bot.py"]
+CMD ["sh", "-c", "uvicorn app:app --host 0.0.0.0 --port ${PORT}"]
