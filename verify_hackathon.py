@@ -70,6 +70,7 @@ print("\n── Google Cloud Service ──────────────�
 
 check((ROOT / "Dockerfile").exists(), "Dockerfile present for Cloud Run")
 check((ROOT / "cloudbuild.yaml").exists(), "cloudbuild.yaml present for Cloud Build")
+check((ROOT / "verify_gcp.py").exists(), "verify_gcp.py present (GCP proof artifact)")
 
 cloudbuild_src = _read("cloudbuild.yaml")
 check("asia-southeast1" in cloudbuild_src, "Cloud Run region is asia-southeast1")
