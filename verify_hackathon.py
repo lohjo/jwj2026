@@ -84,7 +84,8 @@ check("async with client.aio.live.connect" in live_src,
 check("live_voice_exchange" in live_src, "live_voice_exchange() function defined")
 check("LiveConnectConfig" in live_src, "LiveConnectConfig used in live.py")
 check("response_modalities" in live_src, "response_modalities set in live.py")
-check("end_of_turn=True" in live_src, "end_of_turn signalling in live.py")
+check("end_of_turn=True" in live_src or "turn_complete=True" in live_src,
+      "end_of_turn / turn_complete signalling in live.py")
 check("b\"\"" in live_src or "return b" in live_src,
       "live_voice_exchange returns bytes (fail-safe)")
 
@@ -106,7 +107,8 @@ check("reply_voice" in bot_src, "Bot sends spoken verdict (voice reply)")
 # ── 7. Real-time / interruptible ──────────────────────────────────────────────
 print("\n── Real-time Interaction ────────────────────────────────────────────────")
 
-check("end_of_turn" in live_src, "end_of_turn signalling for interruptibility")
+check("end_of_turn" in live_src or "turn_complete" in live_src,
+      "end_of_turn / turn_complete signalling for interruptibility")
 check("session.receive" in live_src, "Bidirectional streaming via session.receive()")
 
 # ── 8. Multilingual support ───────────────────────────────────────────────────
