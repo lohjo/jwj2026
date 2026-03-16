@@ -24,10 +24,16 @@ from media.live import live_voice_exchange
 
 # Optional media modules — may fail if dependencies are missing
 try:
-    from media.image import extract_text_from_image, detect_image_manipulation
+    from media.image import extract_text_from_image, detect_image_manipulation, analyse_image_with_gemini
 except Exception:
     extract_text_from_image = None
     detect_image_manipulation = None
+    analyse_image_with_gemini = None
+
+try:
+    from media.audio import transcribe_audio
+except Exception:
+    transcribe_audio = None
 
 try:
     from media.video import analyse_video
@@ -323,13 +329,236 @@ async def analyse_stream(body: AnalyseStreamRequest):
     )
 
 
+# ── Full Image Analysis (SSE streaming) ───────────────────────────────────────
+
+@app.post("/analyse-image-stream")
+async def analyse_image_stream(file: UploadFile = File(...)):
+    """
+    Run the full image detection pipeline with SSE streaming progress.
+
+    Pipeline: Gemini Visual → GUARD → Misinformation → Manipulation → Insights.
+    Mirrors telegram_bot.py handle_photo behaviour.
+    """
+    if analyse_image_with_gemini is None:
+        return JSONResponse(status_code=503, content={"error": "Image analysis not available"})
+
+    path = _safe_path(file.filename)
+    with open(path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+
+    async def generate():
+        def sse(event: str, data: dict) -> str:
+            return f"event: {event}\ndata: {json.dumps(data)}\n\n"
+
+        try:
+            # Step 1: Gemini visual analysis (caption, OCR, AI signals)
+            yield sse("step", {"id": "vision", "status": "running"})
+            try:
+                gemini_vis = await analyse_image_with_gemini(path)
+            except Exception as exc:
+                logger.exception("[SSE-Image] Gemini vision failed: %s", exc)
+                gemini_vis = {"caption": "", "ocr_text": None, "ai_signals": "", "error": str(exc)}
+            yield sse("step", {"id": "vision", "status": "done", "data": gemini_vis})
+
+            caption = gemini_vis.get("caption", "")
+            ocr_text = gemini_vis.get("ocr_text") or ""
+            ai_signals = gemini_vis.get("ai_signals", "")
+
+            # Build text input for detection pipeline
+            guard_input = f"Image description: {caption}"
+            if ocr_text:
+                guard_input += f"\nExtracted text: {ocr_text}"
+            if ai_signals:
+                guard_input += f"\nVisual AI signals: {ai_signals}"
+
+            # Step 2: GUARD safety check
+            yield sse("step", {"id": "guard", "status": "running"})
+            try:
+                guard_result = await run_guard_detection(
+                    guard_input, content_type="image", source_lang="en"
+                )
+            except Exception as exc:
+                logger.exception("[SSE-Image] GUARD failed: %s", exc)
+                guard_result = {
+                    "is_safe": None, "label": "api_error",
+                    "raw_response": {}, "safety_flag": None,
+                }
+            yield sse("step", {"id": "guard", "status": "done", "data": guard_result})
+
+            # Step 3: Misinformation detection
+            yield sse("step", {"id": "misinfo", "status": "running"})
+            try:
+                misinfo_result = await detect_misinformation(
+                    guard_input, context_description="image"
+                )
+            except Exception as exc:
+                logger.exception("[SSE-Image] Misinfo failed: %s", exc)
+                misinfo_result = {
+                    "misinformation_detected": False, "misinformation_type": "none",
+                    "claims": [], "explanation": "Unavailable.",
+                }
+            yield sse("step", {"id": "misinfo", "status": "done", "data": misinfo_result})
+
+            # Step 4: Image manipulation detection (OpenCV heuristics)
+            yield sse("step", {"id": "manipulation", "status": "running"})
+            manipulation_result = None
+            if detect_image_manipulation is not None:
+                try:
+                    manipulation_result = await detect_image_manipulation(path)
+                except Exception as exc:
+                    logger.exception("[SSE-Image] Manipulation failed: %s", exc)
+            if manipulation_result is None:
+                manipulation_result = {
+                    "manipulation_detected": False, "manipulation_type": "none",
+                    "signals": [], "explanation": "Check unavailable.", "confidence": 0.0,
+                }
+            yield sse("step", {"id": "manipulation", "status": "done", "data": manipulation_result})
+
+            # Step 5: AI Insights
+            yield sse("step", {"id": "insights", "status": "running"})
+            try:
+                insights_result = await run_insights(
+                    guard_input, guard_result,
+                    misinformation_result=misinfo_result,
+                    manipulation_result=manipulation_result,
+                )
+            except Exception as exc:
+                logger.exception("[SSE-Image] Insights failed: %s", exc)
+                insights_result = {"explanation": "Unavailable.", "is_harmful": False, "llm_used": "failed"}
+            yield sse("step", {"id": "insights", "status": "done", "data": insights_result})
+
+            # Compute combined verdict
+            guard_safe = guard_result.get("is_safe")
+            misinfo_detected = misinfo_result.get("misinformation_detected", False)
+            manip_detected = (manipulation_result or {}).get("manipulation_detected", False)
+            is_harmful = (insights_result or {}).get("is_harmful", False)
+
+            if guard_safe is None:
+                combined_is_safe = None
+            elif guard_safe is False or misinfo_detected or manip_detected or is_harmful:
+                combined_is_safe = False
+            else:
+                combined_is_safe = True
+
+            full_result = {
+                "detection_result": guard_result,
+                "misinfo_result": misinfo_result,
+                "manipulation_result": manipulation_result,
+                "insights_result": insights_result,
+                "image_analysis": {
+                    "caption": caption,
+                    "ocr_text": ocr_text,
+                    "ai_signals": ai_signals,
+                },
+                "is_safe": combined_is_safe,
+                "misinfo_type": misinfo_result.get("misinformation_type", "none"),
+            }
+
+            yield sse("result", full_result)
+
+        except Exception as exc:
+            logger.exception("[SSE-Image] Stream error: %s", exc)
+            yield sse("error", {"message": str(exc)})
+        finally:
+            if os.path.exists(path):
+                os.remove(path)
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
+    )
+
+
 # ── Audio / Gemini Live API ───────────────────────────────────────────────────
+
+
+async def _run_audio_pipeline(audio_bytes: bytes, audio_path: str, mime_type: str) -> dict:
+    """
+    Shared audio processing: transcribe → detect → Live API.
+
+    Returns dict with transcript, detection results, and Live API audio.
+    Mirrors telegram_bot.py handle_audio behaviour.
+    """
+    result = {
+        "transcript": "",
+        "detected_language": "en",
+        "detection_result": None,
+        "misinfo_result": None,
+        "insights_result": None,
+        "is_safe": None,
+        "audio": "",
+        "mime_type": "audio/ogg",
+        "success": False,
+    }
+
+    # Step 1: Transcribe with Deepgram
+    if transcribe_audio is not None and audio_path:
+        try:
+            transcript_result = await transcribe_audio(audio_path)
+            result["transcript"] = transcript_result.get("transcript", "")
+            result["detected_language"] = transcript_result.get("detected_language", "en")
+        except Exception as e:
+            logger.warning("[Audio] Transcription failed: %s", e)
+
+    transcript = result["transcript"]
+
+    # Step 2: Run full detection pipeline on transcript (if long enough)
+    detection_context = ""
+    if transcript and len(transcript) >= 20:
+        try:
+            english_text = transcript
+            full_result = await run_full_detection(
+                english_text, content_type="audio", source_lang=result["detected_language"]
+            )
+            result["detection_result"] = full_result.get("detection_result")
+            result["misinfo_result"] = full_result.get("misinfo_result")
+            result["insights_result"] = full_result.get("insights_result")
+            result["is_safe"] = full_result.get("is_safe")
+            result["misinfo_type"] = full_result.get("misinfo_type", "none")
+
+            # Build context string for Live API
+            explanation = (full_result.get("insights_result") or {}).get("explanation", "")
+            guard_safe = (full_result.get("detection_result") or {}).get("is_safe")
+            misinfo = (full_result.get("misinfo_result") or {}).get("misinformation_detected", False)
+
+            parts = []
+            if guard_safe is False:
+                parts.append("GUARD flagged this content as unsafe.")
+            if misinfo:
+                parts.append(f"Misinformation detected: {full_result.get('misinfo_type', 'unknown')}.")
+            if explanation:
+                parts.append(explanation)
+            detection_context = " ".join(parts) if parts else "Content analysed. No issues found."
+        except Exception as e:
+            logger.warning("[Audio] Detection pipeline failed: %s", e)
+
+    if not detection_context:
+        detection_context = f"Audio transcript: {transcript[:200]}" if transcript else "User submitted audio for analysis."
+
+    # Step 3: Get spoken verdict from Gemini Live API
+    try:
+        reply_ogg = await live_voice_exchange(
+            audio_bytes=audio_bytes,
+            mime_type=mime_type,
+            system_context=detection_context,
+        )
+        if reply_ogg:
+            result["audio"] = base64.b64encode(reply_ogg).decode("utf-8")
+            result["success"] = True
+    except Exception as e:
+        logger.warning("[Audio] Live API failed: %s", e)
+
+    return result
+
 
 @app.post("/analyse-audio")
 async def analyse_audio(file: UploadFile = File(...)):
     """
-    Send audio to Gemini Live API for spoken verdict.
-    Returns base64-encoded OGG audio.
+    Full audio analysis: Deepgram transcription → GUARD + misinformation →
+    insights → Gemini Live API spoken verdict.
+
+    Returns transcription, detection results, AND base64-encoded OGG audio.
     """
     path = _safe_path(file.filename)
     try:
@@ -339,23 +568,11 @@ async def analyse_audio(file: UploadFile = File(...)):
         with open(path, "rb") as f:
             audio_bytes = f.read()
 
-        # Determine MIME type from filename
         ext = os.path.splitext(file.filename or "")[1].lower()
         mime_type = AUDIO_MIME_TYPES.get(ext, "audio/webm")
 
-        reply_ogg = await live_voice_exchange(
-            audio_bytes=audio_bytes,
-            mime_type=mime_type,
-            system_context="User submitted audio for analysis via web interface.",
-        )
+        return await _run_audio_pipeline(audio_bytes, path, mime_type)
 
-        if reply_ogg:
-            return {
-                "audio": base64.b64encode(reply_ogg).decode("utf-8"),
-                "mime_type": "audio/ogg",
-                "success": True,
-            }
-        return {"audio": "", "success": False, "error": "Live API returned no audio"}
     except Exception as e:
         logger.exception("[API] Audio analysis failed: %s", e)
         return JSONResponse(status_code=500, content={"error": str(e)})
@@ -371,11 +588,13 @@ async def websocket_live_audio(websocket: WebSocket):
     """
     WebSocket endpoint for real-time Gemini Live API audio exchange.
 
+    Full pipeline: transcribe → detect → Live API spoken verdict.
+
     Protocol:
     1. Client sends binary audio frames (WebM/OGG chunks)
     2. Client sends text message "END" to signal recording complete
-    3. Server processes with Gemini Live API
-    4. Server sends back base64-encoded OGG audio response
+    3. Server transcribes, runs detection, then processes with Live API
+    4. Server sends back JSON with transcript, detection results, and audio
     5. Server sends text "DONE" to signal completion
     """
     await websocket.accept()
@@ -392,7 +611,6 @@ async def websocket_live_audio(websocket: WebSocket):
             elif "text" in message:
                 text = message["text"]
                 if text == "END":
-                    # Process collected audio
                     audio_data = b"".join(audio_chunks)
                     audio_chunks.clear()
 
@@ -401,24 +619,17 @@ async def websocket_live_audio(websocket: WebSocket):
                         await websocket.send_text("DONE")
                         continue
 
-                    reply_ogg = await live_voice_exchange(
-                        audio_bytes=audio_data,
-                        mime_type="audio/webm",
-                        system_context="User is speaking to SENTINEL via web interface for real-time content analysis.",
-                    )
+                    # Save temp file for transcription
+                    tmp_path = _safe_path("ws_audio.webm")
+                    try:
+                        with open(tmp_path, "wb") as f:
+                            f.write(audio_data)
 
-                    if reply_ogg:
-                        audio_b64 = base64.b64encode(reply_ogg).decode("utf-8")
-                        await websocket.send_json({
-                            "audio": audio_b64,
-                            "mime_type": "audio/ogg",
-                            "success": True,
-                        })
-                    else:
-                        await websocket.send_json({
-                            "success": False,
-                            "error": "Gemini Live API returned no audio",
-                        })
+                        result = await _run_audio_pipeline(audio_data, tmp_path, "audio/webm")
+                        await websocket.send_json(result)
+                    finally:
+                        if os.path.exists(tmp_path):
+                            os.remove(tmp_path)
 
                     await websocket.send_text("DONE")
 
@@ -430,3 +641,44 @@ async def websocket_live_audio(websocket: WebSocket):
             await websocket.send_json({"error": str(e)})
         except Exception:
             pass
+
+
+# ── Research Agent ────────────────────────────────────────────────────────────
+
+
+class ResearchRequest(BaseModel):
+    query: str
+
+
+@app.post("/research")
+async def research_endpoint(body: ResearchRequest):
+    """
+    Run web research on a query using the research agent.
+
+    Returns research summary, sources, and paths.
+    """
+    query = body.query.strip()
+    if not query:
+        return JSONResponse(status_code=400, content={"error": "Query is required"})
+
+    try:
+        from research_agent.agent import research
+
+        result = await research(query)
+
+        summary_text = ""
+        if result.get("summary_path") and os.path.exists(result["summary_path"]):
+            with open(result["summary_path"], "r", encoding="utf-8") as f:
+                summary_text = f.read()
+
+        return {
+            "summary": summary_text,
+            "sources": result.get("sources", []),
+            "cache_hit": result.get("cache_hit", False),
+            "llm_used": result.get("llm_used", ""),
+        }
+    except ImportError:
+        return JSONResponse(status_code=503, content={"error": "Research agent not available"})
+    except Exception as e:
+        logger.exception("[API] Research failed: %s", e)
+        return JSONResponse(status_code=500, content={"error": str(e)})
