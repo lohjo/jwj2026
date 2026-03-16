@@ -57,11 +57,22 @@ def test_root_html_copy_helpers_are_event_safe(client):
     """Copy helper functions guard when click event/button is unavailable."""
     res = client.get("/")
     assert res.status_code == 200
+    # Ensure helper function declarations exist
     assert "function copyResults(clickEvent)" in res.text
     assert "function copyImageResults(clickEvent)" in res.text
-    assert "if (!btn) return;" in res.text
+
+    # The "if (!btn) return;" guard must be present within or after copyResults
+    copy_results_start = res.text.index("function copyResults(clickEvent)")
+    assert "if (!btn) return;" in res.text[copy_results_start:]
+
+    # The "if (!body || !toggle) return;" guard should still exist somewhere
     assert "if (!body || !toggle) return;" in res.text
-    assert "if (!box || !toggle) return;" in res.text
+
+    # The image JSON toggle helper must exist and contain its specific guard
+    assert "function toggleImageRawJson(" in res.text
+    toggle_image_raw_start = res.text.index("function toggleImageRawJson(")
+    assert "if (!box || !toggle) return;" in res.text[toggle_image_raw_start:]
+
     assert "if (!detailsEl || !verdictEl || !transcriptEl || !resultsEl) return;" in res.text
 
 
