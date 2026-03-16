@@ -7,6 +7,8 @@ Falls back gracefully to b"" on any failure — never raises into the caller.
 
 import io
 import logging
+import shutil
+import subprocess
 
 from google import genai
 from google.genai import types
@@ -14,6 +16,9 @@ from google.genai import types
 from config import GEMINI_API_KEY, GEMINI_LIVE_MODEL, GEMINI_LIVE_VOICE
 
 logger = logging.getLogger(__name__)
+
+# Cache ffmpeg availability check
+_ffmpeg_path: str | None = shutil.which("ffmpeg")
 
 SENTINEL_LIVE_PERSONA = """
 You are SENTINEL, an AI content detection assistant for Singapore users.
@@ -112,9 +117,40 @@ async def live_voice_exchange(
 
 
 def _pcm_to_ogg(pcm_bytes: bytes, sample_rate: int = 24000) -> bytes:
-    """Convert raw PCM16 from Gemini Live API to OGG/Vorbis for Telegram."""
+    """Convert raw PCM16 from Gemini Live API to OGG/Vorbis for Telegram.
+
+    Uses subprocess ffmpeg directly to avoid the pydub ``audioop`` dependency
+    that was removed in Python 3.13+.  Falls back to pydub if ffmpeg is not
+    on PATH.
+    """
     if not pcm_bytes:
         return b""
+
+    # Primary: subprocess ffmpeg (no audioop needed)
+    if _ffmpeg_path:
+        try:
+            result = subprocess.run(
+                [
+                    _ffmpeg_path, "-y",
+                    "-f", "s16le", "-ar", str(sample_rate), "-ac", "1",
+                    "-i", "pipe:0",
+                    "-c:a", "libvorbis", "-f", "ogg", "pipe:1",
+                ],
+                input=pcm_bytes,
+                capture_output=True,
+                timeout=30,
+            )
+            if result.returncode == 0 and result.stdout:
+                return result.stdout
+            logger.warning(
+                "[Live API] ffmpeg PCM→OGG returned %d: %s",
+                result.returncode,
+                result.stderr[:200] if result.stderr else "",
+            )
+        except Exception as e:
+            logger.warning("[Live API] ffmpeg PCM→OGG failed: %s", e)
+
+    # Fallback: pydub (requires audioop + ffmpeg)
     try:
         from pydub import AudioSegment
 
@@ -133,18 +169,51 @@ def _pcm_to_ogg(pcm_bytes: bytes, sample_rate: int = 24000) -> bytes:
 
 
 def _to_pcm(audio_bytes: bytes, mime_type: str) -> bytes:
-    """Convert any input audio format to PCM16 mono 16kHz for the Live API."""
+    """Convert any input audio format to PCM16 mono 16kHz for the Live API.
+
+    Uses subprocess ffmpeg directly to avoid the pydub ``audioop`` dependency
+    that was removed in Python 3.13+.  Falls back to pydub if ffmpeg is not
+    on PATH.
+    """
+    if not audio_bytes:
+        return b""
+
+    fmt_map = {
+        "audio/ogg": "ogg",
+        "audio/mp4": "mp4",
+        "audio/mpeg": "mp3",
+        "audio/wav": "wav",
+        "audio/webm": "webm",
+    }
+    fmt = fmt_map.get(mime_type, "ogg")
+
+    # Primary: subprocess ffmpeg (no audioop needed)
+    if _ffmpeg_path:
+        try:
+            result = subprocess.run(
+                [
+                    _ffmpeg_path, "-y",
+                    "-f", fmt, "-i", "pipe:0",
+                    "-f", "s16le", "-ar", "16000", "-ac", "1", "pipe:1",
+                ],
+                input=audio_bytes,
+                capture_output=True,
+                timeout=30,
+            )
+            if result.returncode == 0 and result.stdout:
+                return result.stdout
+            logger.warning(
+                "[Live API] ffmpeg input conversion returned %d: %s",
+                result.returncode,
+                result.stderr[:200] if result.stderr else "",
+            )
+        except Exception as e:
+            logger.warning("[Live API] ffmpeg input conversion failed: %s", e)
+
+    # Fallback: pydub (requires audioop + ffmpeg)
     try:
         from pydub import AudioSegment
 
-        fmt_map = {
-            "audio/ogg": "ogg",
-            "audio/mp4": "mp4",
-            "audio/mpeg": "mp3",
-            "audio/wav": "wav",
-            "audio/webm": "webm",
-        }
-        fmt = fmt_map.get(mime_type, "ogg")
         audio = AudioSegment.from_file(io.BytesIO(audio_bytes), format=fmt)
         audio = audio.set_frame_rate(16000).set_channels(1).set_sample_width(2)
         return audio.raw_data

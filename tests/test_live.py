@@ -140,6 +140,7 @@ def test_pcm_to_ogg_returns_ogg_bytes_for_valid_pcm():
 
 
 def test_pcm_to_ogg_returns_empty_bytes_on_pydub_error():
-    with patch("media.live.io.BytesIO", side_effect=Exception("pydub error")):
+    with patch("media.live._ffmpeg_path", None), \
+         patch("media.live.io.BytesIO", side_effect=Exception("pydub error")):
         result = _pcm_to_ogg(b"\x00\x01" * 100)
     assert result == b""
