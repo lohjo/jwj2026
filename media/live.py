@@ -85,6 +85,8 @@ async def live_voice_exchange(
             ),
         )
 
+        logger.info("[Live API] Session opened — model=%s", GEMINI_LIVE_MODEL)
+
         async with client.aio.live.connect(
             model=GEMINI_LIVE_MODEL,
             config=config,
@@ -109,7 +111,15 @@ async def live_voice_exchange(
                         if part.inline_data:
                             pcm_audio += part.inline_data.data
 
-        return _pcm_to_ogg(pcm_audio)
+        logger.info("[Live API] Received %d bytes PCM audio", len(pcm_audio))
+
+        ogg_audio = _pcm_to_ogg(pcm_audio)
+        if ogg_audio:
+            logger.info(
+                "[Live API] Converted to %d bytes OGG — sending reply",
+                len(ogg_audio),
+            )
+        return ogg_audio
 
     except Exception as e:
         logger.warning("[Live API] Failed: %s — falling back to ElevenLabs", e)
