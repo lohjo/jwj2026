@@ -195,6 +195,33 @@ def test_analyse_stream_unsafe_content(client):
     assert '"is_safe": false' in body
 
 
+def test_predict_stream_returns_sse_events(client):
+    """POST /predict-stream returns SSE events for prediction steps."""
+    res = client.post(
+        "/predict-stream",
+        json={"text": "MOH announcement: cases rising. Please share."},
+    )
+
+    assert res.status_code == 200
+    assert "text/event-stream" in res.headers["content-type"]
+    body = res.text
+
+    assert "event: step" in body
+    assert "event: source" in body
+    assert "event: result" in body
+    assert '"id": "topics"' in body
+    assert '"id": "sources"' in body
+    assert '"id": "analyze"' in body
+    assert '"predictions"' in body
+
+
+def test_predict_stream_empty_text_returns_400(client):
+    """Prediction SSE endpoint rejects empty text."""
+    res = client.post("/predict-stream", json={"text": ""})
+    assert res.status_code == 400
+    assert "error" in res.json()
+
+
 # ---------------------------------------------------------------------------
 # Audio / Gemini Live API
 # ---------------------------------------------------------------------------

@@ -24,6 +24,7 @@ from pipeline.guard import run_guard_detection
 from pipeline.insights import run_insights
 from pipeline.translator import detect_language, translate_to_english, translate_from_english
 from pipeline.formatter import format_detection_message
+from pipeline.predict_demo import get_demo_prediction
 from media.live import live_voice_exchange, InterruptibleLiveSession, _to_pcm, _pcm_to_ogg
 
 # Optional media modules — may fail if dependencies are missing
@@ -242,6 +243,10 @@ class AnalyseStreamRequest(BaseModel):
     text: str
 
 
+class PredictStreamRequest(BaseModel):
+    text: str
+
+
 @app.post("/analyse-stream")
 async def analyse_stream(body: AnalyseStreamRequest):
     """
@@ -361,6 +366,73 @@ async def analyse_stream(body: AnalyseStreamRequest):
 
         except Exception as exc:
             logger.exception("[SSE] Stream error: %s", exc)
+            yield sse("error", {"message": str(exc)})
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
+    )
+
+
+# ── Proactive Prediction (demo SSE streaming) ───────────────────────────────
+
+
+@app.post("/predict-stream")
+async def predict_stream(body: PredictStreamRequest):
+    """Demo rumour prediction stream following the ContextGuard SSE pattern."""
+    text = body.text
+    if not text or not text.strip():
+        return JSONResponse(status_code=400, content={"error": "Text is required"})
+
+    async def generate():
+        def sse(event: str, data: dict) -> str:
+            return f"event: {event}\ndata: {json.dumps(data)}\n\n"
+
+        try:
+            payload = get_demo_prediction(text)
+            topics = payload.get("topics") or {}
+            sources = payload.get("sources") or []
+
+            yield sse("step", {"id": "topics", "status": "running"})
+            yield sse("step", {"id": "topics", "status": "done", "data": topics})
+
+            yield sse("step", {"id": "sources", "status": "running"})
+            for src in sources:
+                try:
+                    url = (src or {}).get("url", "")
+                    domain = ""
+                    if url:
+                        try:
+                            domain = url.split("//", 1)[1].split("/", 1)[0]
+                        except Exception:
+                            domain = ""
+                    yield sse(
+                        "source",
+                        {
+                            "label": (src or {}).get("label", "Source"),
+                            "url": url,
+                            "domain": domain,
+                        },
+                    )
+                except Exception:
+                    continue
+            yield sse("step", {"id": "sources", "status": "done"})
+
+            yield sse("step", {"id": "analyze", "status": "running"})
+            yield sse("step", {"id": "analyze", "status": "done"})
+
+            result = {
+                "topics": topics,
+                "predictions": payload.get("predictions", []),
+                "historicalPatterns": payload.get("historicalPatterns", []),
+                "communityLeadersCount": payload.get("communityLeadersCount", 0),
+                "constituencies": payload.get("constituencies", []),
+                "sources": sources,
+            }
+            yield sse("result", result)
+        except Exception as exc:
+            logger.exception("[Predict SSE] Stream error: %s", exc)
             yield sse("error", {"message": str(exc)})
 
     return StreamingResponse(
