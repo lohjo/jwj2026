@@ -1,0 +1,16 @@
+[
+  {
+    "index": 1,
+    "url": "https://www.youtube.com/watch?v=kXBn1-ftL3M",
+    "domain": "www.youtube.com",
+    "word_count": 184,
+    "fetched_at": "2026-03-15T08:36:52.019951"
+  },
+  {
+    "index": 2,
+    "url": "https://factcheck.afp.com/doc.afp.com.362N88T",
+    "domain": "factcheck.afp.com",
+    "word_count": 797,
+    "fetched_at": "2026-03-15T08:36:52.021483"
+  }
+]

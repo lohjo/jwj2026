@@ -1,0 +1,3 @@
+```json
+{
+  "summary_md": "# Fact Check: Fabricated Quote Regarding Singapore's Income Tax\n\n## Overview\nThe claim that Lee Hsien Loong, identified as Singapore's Prime Minister, announced Singapore would cancel all personal income tax before the end of 2025 to stimulate economic growth is **fabricated**.\n\n## Key Findings\n*   **Quote is Fabricated:** No credible evidence from the provided sources supports the claim that Lee Hsien Loong made an announcement about canceling all personal income tax by 2025.\n*   **Precedent for Fabricated Content:** An AFP Fact Check article published July 10, 2024, explicitly states that doctored videos and false claims attributed to Lee Hs
