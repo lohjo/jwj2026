@@ -25,9 +25,16 @@ from pipeline.insights import run_insights
 from pipeline.translator import detect_language, translate_to_english, translate_from_english
 from pipeline.formatter import format_detection_message
 from pipeline.predict_demo import get_demo_prediction
-from media.live import live_voice_exchange, InterruptibleLiveSession, _to_pcm, _pcm_to_ogg
 
 # Optional media modules — may fail if dependencies are missing
+try:
+    from media.live import live_voice_exchange, InterruptibleLiveSession, _to_pcm, _pcm_to_ogg
+except Exception:
+    live_voice_exchange = None
+    InterruptibleLiveSession = None
+    _to_pcm = None
+    _pcm_to_ogg = None
+
 try:
     from media.image import extract_text_from_image, detect_image_manipulation, analyse_image_with_gemini
 except Exception:
@@ -57,8 +64,13 @@ AUDIO_MIME_TYPES = {
 @asynccontextmanager
 async def lifespan(application: FastAPI):
     """Start the Telegram bot poller when FastAPI starts up."""
-    from telegram_bot import start_bot_background
-    start_bot_background()
+    try:
+        from telegram_bot import start_bot_background
+        start_bot_background()
+    except Exception as exc:
+        logging.getLogger(__name__).warning(
+            "Telegram bot failed to start: %s — web server will continue without it", exc
+        )
     yield
 
 

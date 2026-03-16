@@ -28,10 +28,29 @@ from pipeline.detector import detect_misinformation, run_full_detection
 from pipeline.insights import call_llm, run_insights
 from pipeline.formatter import format_detection_message
 from pipeline.logger import log_to_clickhouse
-from media.image import extract_text_from_image, analyse_image_with_gemini, detect_image_manipulation
-from media.audio import transcribe_audio, synthesise_speech
-from media import live
-from media.video import analyse_video
+
+try:
+    from media.image import extract_text_from_image, analyse_image_with_gemini, detect_image_manipulation
+except Exception:
+    extract_text_from_image = None
+    analyse_image_with_gemini = None
+    detect_image_manipulation = None
+
+try:
+    from media.audio import transcribe_audio, synthesise_speech
+except Exception:
+    transcribe_audio = None
+    synthesise_speech = None
+
+try:
+    from media import live
+except Exception:
+    live = None
+
+try:
+    from media.video import analyse_video
+except Exception:
+    analyse_video = None
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
