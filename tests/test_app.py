@@ -243,3 +243,173 @@ def test_websocket_live_audio_api_failure(client):
 
             done = ws.receive_text()
             assert done == "DONE"
+
+
+# ---------------------------------------------------------------------------
+# Image analysis SSE endpoint
+# ---------------------------------------------------------------------------
+
+def test_analyse_image_stream_returns_sse_events(client):
+    """POST /analyse-image-stream returns SSE events for each pipeline step."""
+    vis_result = {"caption": "A photo of a cat", "ocr_text": None, "ai_signals": "No AI signals"}
+    guard_result = {"is_safe": True, "label": "safe", "raw_response": {}, "safety_flag": None}
+    misinfo_result = {"misinformation_detected": False, "misinformation_type": "none", "claims": [], "explanation": "Clean"}
+    manip_result = {"manipulation_detected": False, "manipulation_type": "none", "signals": [], "explanation": "No manipulation.", "confidence": 0.1}
+    insights_result = {"explanation": "No issues found.", "is_harmful": False, "llm_used": "gemini"}
+
+    with patch("app.analyse_image_with_gemini", new_callable=AsyncMock, return_value=vis_result), \
+         patch("app.run_guard_detection", new_callable=AsyncMock, return_value=guard_result), \
+         patch("app.detect_misinformation", new_callable=AsyncMock, return_value=misinfo_result), \
+         patch("app.detect_image_manipulation", new_callable=AsyncMock, return_value=manip_result), \
+         patch("app.run_insights", new_callable=AsyncMock, return_value=insights_result):
+        res = client.post(
+            "/analyse-image-stream",
+            files={"file": ("test.jpg", b"fake_image_data", "image/jpeg")},
+        )
+
+    assert res.status_code == 200
+    assert "text/event-stream" in res.headers["content-type"]
+    body = res.text
+
+    # All pipeline steps should appear
+    assert "event: step" in body
+    assert "event: result" in body
+    assert '"id": "vision"' in body
+    assert '"id": "guard"' in body
+    assert '"id": "misinfo"' in body
+    assert '"id": "manipulation"' in body
+    assert '"id": "insights"' in body
+    assert '"is_safe": true' in body
+
+
+def test_analyse_image_stream_unsafe_content(client):
+    """Image SSE endpoint detects unsafe content correctly."""
+    vis_result = {"caption": "Manipulated photo", "ocr_text": "fake text", "ai_signals": "AI artifacts detected"}
+    guard_result = {"is_safe": False, "label": "unsafe", "raw_response": {}, "safety_flag": "manipulation"}
+    misinfo_result = {"misinformation_detected": True, "misinformation_type": "fabricated", "claims": ["fake"], "explanation": "Fabricated"}
+    manip_result = {"manipulation_detected": True, "manipulation_type": "splicing", "signals": ["edge anomaly"], "explanation": "Splicing detected", "confidence": 0.9}
+    insights_result = {"explanation": "Content is harmful.", "is_harmful": True, "llm_used": "gemini"}
+
+    with patch("app.analyse_image_with_gemini", new_callable=AsyncMock, return_value=vis_result), \
+         patch("app.run_guard_detection", new_callable=AsyncMock, return_value=guard_result), \
+         patch("app.detect_misinformation", new_callable=AsyncMock, return_value=misinfo_result), \
+         patch("app.detect_image_manipulation", new_callable=AsyncMock, return_value=manip_result), \
+         patch("app.run_insights", new_callable=AsyncMock, return_value=insights_result):
+        res = client.post(
+            "/analyse-image-stream",
+            files={"file": ("test.jpg", b"fake_image", "image/jpeg")},
+        )
+
+    assert res.status_code == 200
+    body = res.text
+    assert '"is_safe": false' in body
+
+
+def test_analyse_image_stream_handles_vision_failure(client):
+    """Image SSE endpoint handles Gemini vision failure gracefully."""
+    guard_result = {"is_safe": None, "label": "api_error", "raw_response": {}, "safety_flag": None}
+    misinfo_result = {"misinformation_detected": False, "misinformation_type": "none", "claims": [], "explanation": "Clean"}
+    manip_result = {"manipulation_detected": False, "manipulation_type": "none", "signals": [], "explanation": "OK", "confidence": 0.0}
+    insights_result = {"explanation": "N/A", "is_harmful": False, "llm_used": "failed"}
+
+    with patch("app.analyse_image_with_gemini", new_callable=AsyncMock, side_effect=Exception("Vision API down")), \
+         patch("app.run_guard_detection", new_callable=AsyncMock, return_value=guard_result), \
+         patch("app.detect_misinformation", new_callable=AsyncMock, return_value=misinfo_result), \
+         patch("app.detect_image_manipulation", new_callable=AsyncMock, return_value=manip_result), \
+         patch("app.run_insights", new_callable=AsyncMock, return_value=insights_result):
+        res = client.post(
+            "/analyse-image-stream",
+            files={"file": ("test.jpg", b"fake_image", "image/jpeg")},
+        )
+
+    assert res.status_code == 200
+    body = res.text
+    # Vision error should not crash the pipeline
+    assert "event: result" in body
+
+
+# ---------------------------------------------------------------------------
+# Enhanced audio with transcription + detection pipeline
+# ---------------------------------------------------------------------------
+
+def test_analyse_audio_includes_transcript(client):
+    """POST /analyse-audio returns transcript and detection results alongside audio."""
+    fake_ogg = b"OggS" + b"\x00" * 100
+    transcript_result = {"transcript": "Hello world, test content.", "detected_language": "en"}
+    detection_result = {
+        "detection_result": {"is_safe": True, "label": "safe"},
+        "misinfo_result": {"misinformation_detected": False},
+        "insights_result": {"explanation": "Clean", "is_harmful": False},
+        "is_safe": True,
+        "misinfo_type": "none",
+    }
+
+    with patch("app.transcribe_audio", new_callable=AsyncMock, return_value=transcript_result), \
+         patch("app.run_full_detection", new_callable=AsyncMock, return_value=detection_result), \
+         patch("app.live_voice_exchange", new_callable=AsyncMock, return_value=fake_ogg):
+        res = client.post(
+            "/analyse-audio",
+            files={"file": ("test.webm", b"fake_audio_data", "audio/webm")},
+        )
+
+    assert res.status_code == 200
+    data = res.json()
+    assert data["success"] is True
+    assert data["transcript"] == "Hello world, test content."
+    assert data["detected_language"] == "en"
+    assert data["detection_result"]["is_safe"] is True
+
+
+def test_analyse_audio_transcription_failure_still_returns(client):
+    """Audio analysis continues even if transcription fails."""
+    with patch("app.transcribe_audio", new_callable=AsyncMock, side_effect=Exception("Deepgram down")), \
+         patch("app.live_voice_exchange", new_callable=AsyncMock, return_value=b""):
+        res = client.post(
+            "/analyse-audio",
+            files={"file": ("test.webm", b"fake_audio", "audio/webm")},
+        )
+
+    assert res.status_code == 200
+    data = res.json()
+    # Should return with empty transcript, no crash
+    assert data["transcript"] == ""
+    assert data["success"] is False
+
+
+# ---------------------------------------------------------------------------
+# Research endpoint
+# ---------------------------------------------------------------------------
+
+def test_research_empty_query(client):
+    """POST /research with empty query returns 400."""
+    res = client.post("/research", json={"query": ""})
+    assert res.status_code == 400
+    assert "error" in res.json()
+
+
+def test_research_success(client):
+    """POST /research returns research summary and sources."""
+    import tempfile, os
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as f:
+        f.write("## Research Summary\nThis is the summary.")
+        tmp_path = f.name
+
+    try:
+        mock_result = {
+            "summary_path": tmp_path,
+            "skill_path": "",
+            "cache_hit": False,
+            "sources": ["https://example.com"],
+            "raw_dir": "",
+            "llm_used": "gemini",
+        }
+        with patch("research_agent.agent.research", new_callable=AsyncMock, return_value=mock_result):
+            res = client.post("/research", json={"query": "fact check: coffee cures cancer"})
+
+        assert res.status_code == 200
+        data = res.json()
+        assert "Research Summary" in data["summary"]
+        assert data["sources"] == ["https://example.com"]
+        assert data["llm_used"] == "gemini"
+    finally:
+        os.unlink(tmp_path)
