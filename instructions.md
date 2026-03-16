@@ -192,6 +192,27 @@ gcloud run deploy sentinel \
   --set-env-vars "GOOGLE_GENAI_USE_VERTEXAI=FALSE"
 ```
 
+```pwsh
+gcloud run deploy sentinel `
+  --source . `
+  --region asia-southeast1 `
+  --platform managed `
+  --allow-unauthenticated `
+  --memory 2Gi `
+  --cpu 2 `
+  --timeout 300 `
+  --set-env-vars "TELEGRAM_TOKEN=$env:TELEGRAM_TOKEN" `
+  --set-env-vars "GEMINI_API_KEY=$env:GEMINI_API_KEY" `
+  --set-env-vars "OPENAI_API_KEY=$env:OPENAI_API_KEY" `
+  --set-env-vars "OPENAI_API_BASE=https://api.sea-lion.ai/v1" `
+  --set-env-vars "GROQ_API_KEY=$env:GROQ_API_KEY" `
+  --set-env-vars "DEEPGRAM_API_KEY=$env:DEEPGRAM_API_KEY" `
+  --set-env-vars "ELEVENLABS_API_KEY=$env:ELEVENLABS_API_KEY" `
+  --set-env-vars "CLICKHOUSE_HOST=$env:CLICKHOUSE_HOST" `
+  --set-env-vars "CLICKHOUSE_PASSWORD=$env:CLICKHOUSE_PASSWORD" `
+  --set-env-vars "GOOGLE_GENAI_USE_VERTEXAI=FALSE"
+```
+
 This command:
 1. Uploads your source code (respecting `.gcloudignore`).
 2. Builds the Docker image in the cloud using Cloud Build.
