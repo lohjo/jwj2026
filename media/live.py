@@ -138,7 +138,7 @@ def _pcm_to_ogg(pcm_bytes: bytes, sample_rate: int = 24000) -> bytes:
                 ],
                 input=pcm_bytes,
                 capture_output=True,
-                timeout=30,
+                timeout=15,
             )
             if result.returncode == 0 and result.stdout:
                 return result.stdout
@@ -198,7 +198,7 @@ def _to_pcm(audio_bytes: bytes, mime_type: str) -> bytes:
                 ],
                 input=audio_bytes,
                 capture_output=True,
-                timeout=30,
+                timeout=15,
             )
             if result.returncode == 0 and result.stdout:
                 return result.stdout
