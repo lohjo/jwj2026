@@ -692,7 +692,11 @@ def _start_health_server():
         thread.start()
         logger.info("Health check server listening on port %d", port)
     except OSError as exc:
-        logger.warning("Health check server could not bind to port %d: %s", port, exc)
+        logger.warning(
+            "Health check server could not bind to port %d: %s. "
+            "Bot will continue without health endpoint.",
+            port, exc,
+        )
 
 
 # ── Bot startup ───────────────────────────────────────────────────────
