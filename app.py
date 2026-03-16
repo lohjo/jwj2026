@@ -3,8 +3,10 @@ app.py — FastAPI web server for SENTINEL detection pipeline.
 
 Serves the web interface (static/index.html) and provides REST + WebSocket
 endpoints for text, image, audio (Gemini Live API), and video analysis.
+On startup, also launches the Telegram bot poller in a background thread.
 """
 
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, UploadFile, File, Form, Query, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse, HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -50,10 +52,20 @@ AUDIO_MIME_TYPES = {
     ".webm": "audio/webm", ".mp4": "audio/mp4", ".m4a": "audio/mp4",
 }
 
+
+@asynccontextmanager
+async def lifespan(application: FastAPI):
+    """Start the Telegram bot poller when FastAPI starts up."""
+    from telegram_bot import start_bot_background
+    start_bot_background()
+    yield
+
+
 app = FastAPI(
     title="SENTINEL — AI Content Detection",
     description="Multimodal AI content detection: text, image, audio (Gemini Live API), and video analysis.",
     version="2.0.0",
+    lifespan=lifespan,
 )
 
 UPLOAD_FOLDER = "uploads"

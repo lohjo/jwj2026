@@ -122,7 +122,11 @@ async def run_insights(
     # Build context sections
     guard_label = detection_result.get("label", "unknown")
     guard_context = ""
-    if guard_label not in ("api_error", "timeout", "api_key_missing"):
+    _error_labels = (
+        "api_error", "timeout", "api_key_missing",
+        "auth_error", "permission_denied", "rate_limited", "network_error",
+    )
+    if guard_label not in _error_labels:
         guard_verdict = (
             "Unsafe"
             if detection_result.get("is_safe") is False

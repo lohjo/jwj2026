@@ -73,6 +73,9 @@ RESEARCH_DIR = Path(_optional("RESEARCH_DIR", "research"))
 # ── Rate limiting ────────────────────────────────────────────────────────
 COOLDOWN_SECONDS = float(_optional("COOLDOWN_SECONDS", "3.0"))
 
+# ── Cloud Run ────────────────────────────────────────────────────────────
+HEALTH_PORT = int(_optional("PORT", "8080"))
+
 # ── Legacy aliases (used by existing code during migration) ──────────────
 MODEL_NAME = GEMINI_MODEL
 

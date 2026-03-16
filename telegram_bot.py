@@ -21,7 +21,7 @@ from telegram.ext import (
     filters,
 )
 
-from config import TELEGRAM_TOKEN, COOLDOWN_SECONDS
+from config import TELEGRAM_TOKEN, COOLDOWN_SECONDS, HEALTH_PORT
 from pipeline.translator import detect_language, translate_to_english, translate_from_english
 from pipeline.guard import run_guard_detection
 from pipeline.detector import detect_misinformation, run_full_detection
@@ -169,9 +169,22 @@ async def detect_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         pass
 
     try:
-        results = await run_full_detection(text, content_type="text")
+        # Step 1: Detect language
+        source_lang = detect_language(text) if len(text) >= 20 else "en"
+
+        # Step 2: Translate to English
+        english_text = text
+        if source_lang != "en":
+            english_text = await translate_to_english(text, source_lang)
+
+        # Step 3: Run full detection pipeline
+        results = await run_full_detection(english_text, content_type="text", source_lang=source_lang)
         det = results["detection_result"]
         explanation = (results["insights_result"] or {}).get("explanation", "")
+
+        # Step 4: Translate explanation back
+        if source_lang != "en" and explanation:
+            explanation = await translate_from_english(explanation, source_lang)
 
         response = format_detection_message(
             content_type="text",
@@ -186,6 +199,7 @@ async def detect_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         _schedule_log({
             "user_id": user_id,
             "content_type": "text",
+            "source_language": source_lang,
             "content_preview": text[:500],
             "guard_label": det.get("label", ""),
             "guard_verdict": _verdict_str(det),
@@ -193,7 +207,7 @@ async def detect_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         })
     except Exception as e:
         logger.exception("Error in detect_command")
-        await update.message.reply_text(f"❌ Detection failed: {e}")
+        await update.message.reply_text("❌ Detection failed. Please try again later.")
 
 
 async def research_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -260,7 +274,7 @@ async def research_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         })
     except Exception as exc:
         logger.exception("Error in research_command")
-        await update.message.reply_text(f"❌ Research failed: {exc}")
+        await update.message.reply_text(f"❌ Research failed. Please try again later.")
 
 
 # ── Message handlers ──────────────────────────────────────────────────
@@ -334,7 +348,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
     except Exception as e:
         logger.exception("Error in handle_text")
-        await update.message.reply_text(f"❌ Analysis failed: {e}")
+        await update.message.reply_text("❌ Analysis failed. Please try again later.")
 
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -431,7 +445,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
     except Exception as e:
         logger.exception("Error in handle_photo")
-        await update.message.reply_text(f"❌ Image analysis failed: {e}")
+        await update.message.reply_text("❌ Image analysis failed. Please try again later.")
     finally:
         if image_path and os.path.exists(image_path):
             os.remove(image_path)
@@ -553,7 +567,7 @@ async def handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
     except Exception as e:
         logger.exception("Error in handle_audio")
-        await update.message.reply_text(f"❌ Audio analysis failed: {e}")
+        await update.message.reply_text("❌ Audio analysis failed. Please try again later.")
     finally:
         for p in (audio_path, tts_path):
             if p and os.path.exists(p):
@@ -595,7 +609,7 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
         if video_result.get("error") and not video_result.get("frame_descriptions"):
             await update.message.reply_text(
-                f"⚠️ Video analysis failed: {video_result['error']}"
+                "⚠️ Video analysis could not be completed. Please try a different video."
             )
             return
 
@@ -604,19 +618,19 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         audio_text = video_result.get("audio_transcript", "")
         ai_signals = video_result.get("ai_signals", "")
 
-        guard_input = f"Video frame descriptions: {frame_text}"
-        if audio_text:
-            guard_input += f"\nAudio transcript: {audio_text}"
-        if ai_signals:
-            guard_input += f"\nVisual AI signals: {ai_signals}"
-
-        # Step 4: Language detection on audio
+        # Step 4: Language detection on audio — translate before building guard_input
         source_lang = "en"
+        audio_for_guard = audio_text
         if audio_text and len(audio_text) >= 20:
             source_lang = detect_language(audio_text)
             if source_lang != "en":
-                audio_english = await translate_to_english(audio_text, source_lang)
-                guard_input = guard_input.replace(audio_text, audio_english)
+                audio_for_guard = await translate_to_english(audio_text, source_lang)
+
+        guard_input = f"Video frame descriptions: {frame_text}"
+        if audio_for_guard:
+            guard_input += f"\nAudio transcript: {audio_for_guard}"
+        if ai_signals:
+            guard_input += f"\nVisual AI signals: {ai_signals}"
 
         # Step 5: Run detection pipeline
         results = await run_full_detection(guard_input, content_type="video", source_lang="en")
@@ -662,7 +676,7 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
     except Exception as e:
         logger.exception("Error in handle_video")
-        await update.message.reply_text(f"❌ Video analysis failed: {e}")
+        await update.message.reply_text("❌ Video analysis failed. Please try again later.")
     finally:
         if video_path and os.path.exists(video_path):
             try:
@@ -685,7 +699,7 @@ class _HealthHandler(BaseHTTPRequestHandler):
 
 def _start_health_server():
     """Start a minimal HTTP server on PORT for Cloud Run health checks."""
-    port = int(os.environ.get("PORT", "8080"))
+    port = HEALTH_PORT
     try:
         server = HTTPServer(("0.0.0.0", port), _HealthHandler)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -701,27 +715,50 @@ def _start_health_server():
 
 # ── Bot startup ───────────────────────────────────────────────────────
 
+def _build_app():
+    """Build the Telegram Application with all handlers."""
+    bot_app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+    bot_app.add_handler(CommandHandler("start", start_command))
+    bot_app.add_handler(CommandHandler("help", help_command))
+    bot_app.add_handler(CommandHandler("detect", detect_command))
+    bot_app.add_handler(CommandHandler("research", research_command))
+    bot_app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_text))
+    bot_app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
+    bot_app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, handle_audio))
+    bot_app.add_handler(MessageHandler(filters.VIDEO | filters.VIDEO_NOTE, handle_video))
+    return bot_app
+
+
+def start_bot_background():
+    """Start the Telegram bot poller in a daemon thread (non-blocking).
+
+    Use this when running alongside FastAPI (e.g. on Cloud Run).
+    """
+    if not TELEGRAM_TOKEN:
+        logger.warning("TELEGRAM_TOKEN not set — Telegram bot will not start")
+        return
+
+    def _run():
+        bot_app = _build_app()
+        logger.info("Starting Telegram bot polling (background thread)...")
+        bot_app.run_polling(bootstrap_retries=5)
+
+    thread = threading.Thread(target=_run, daemon=True)
+    thread.start()
+
+
 def start_bot():
-    """Initialise and start the Telegram bot."""
+    """Initialise and start the Telegram bot (blocking — for standalone use)."""
     if not TELEGRAM_TOKEN:
         logger.error("TELEGRAM_TOKEN not set — cannot start bot")
         sys.exit(1)
 
-    # Cloud Run requires a listening port for health checks
+    # Standalone mode: start health server for Cloud Run
     _start_health_server()
 
-    app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
-    app.add_handler(CommandHandler("start", start_command))
-    app.add_handler(CommandHandler("help", help_command))
-    app.add_handler(CommandHandler("detect", detect_command))
-    app.add_handler(CommandHandler("research", research_command))
-    app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_text))
-    app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
-    app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, handle_audio))
-    app.add_handler(MessageHandler(filters.VIDEO | filters.VIDEO_NOTE, handle_video))
-
+    bot_app = _build_app()
     logger.info("Starting Telegram bot polling...")
-    app.run_polling(bootstrap_retries=5)
+    bot_app.run_polling(bootstrap_retries=5)
 
 
 if __name__ == "__main__":
