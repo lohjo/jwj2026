@@ -6,21 +6,23 @@ import asyncio
 import uuid
 import logging
 
-from text_detector import detect_fake_text
-from image_detector import detect_fake_image, detect_fake_video, detect_image_manipulation
-from ocr import extract_text_from_image, analyse_video_frames
+from media.image import (
+    extract_text_from_image,
+    analyse_image_with_gemini,
+    detect_image_manipulation,
+)
+from media.video import analyse_video
 
-# Import detection tools
+# Import detection tools from pipeline
 try:
-    from ai_agent_adk.tools import (
-        run_guard_detection,
-        run_insights,
-        detect_misinformation,
-    )
+    from pipeline.guard import run_guard_detection
+    from pipeline.insights import run_insights
+    from pipeline.detector import detect_misinformation, run_full_detection
 except Exception:
     run_guard_detection = None
     run_insights = None
     detect_misinformation = None
+    run_full_detection = None
 
 app = FastAPI(
     title="Fake Media Detector API",
@@ -47,8 +49,13 @@ def root():
 
 @app.post("/detect-text")
 async def detect_text(text: str = Form(...)):
-    """Analyse text for AI-generation signals using Gemini."""
-    result = detect_fake_text(text)
+    """Analyse text for AI-generation signals using the detection pipeline."""
+    if run_full_detection is None:
+        return JSONResponse(
+            status_code=503,
+            content={"error": "Text detection not available"},
+        )
+    result = await run_full_detection(text, content_type="text")
     return {"analysis": result}
 
 
@@ -81,7 +88,7 @@ async def detect_image(file: UploadFile = File(...)):
     try:
         with open(path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
-        result = await detect_fake_image(path)
+        result = await analyse_image_with_gemini(path)
         return {"analysis": result}
     finally:
         if os.path.exists(path):
@@ -135,7 +142,7 @@ async def detect_video(file: UploadFile = File(...)):
     try:
         with open(path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
-        result = await detect_fake_video(path)
+        result = await analyse_video(path)
         return {"analysis": result}
     finally:
         if os.path.exists(path):
@@ -151,13 +158,16 @@ async def analyse_video_frames_endpoint(
 ):
     """
     Analyse video by sampling frames — OCR extraction + AI signal analysis.
-    Returns: frames_checked, frame_results, ocr_texts, aggregated_signals, fake_probability.
+    Returns: frame_descriptions, audio_transcript, ai_signals, frames_checked, error.
+
+    Note: sample_every_seconds is accepted for API compatibility but not yet
+    used by the underlying analyse_video() implementation.
     """
     path = _safe_path(file.filename)
     try:
         with open(path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
-        result = await analyse_video_frames(path, sample_every_seconds=sample_every_seconds)
+        result = await analyse_video(path)
         return {"analysis": result}
     finally:
         if os.path.exists(path):
