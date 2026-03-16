@@ -1,8 +1,11 @@
 from fastapi import FastAPI, UploadFile, File, Form, Query
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
+from sse_starlette.sse import EventSourceResponse
 import shutil
 import os
 import asyncio
+import json
 import uuid
 import logging
 
@@ -25,13 +28,15 @@ except Exception:
     run_full_detection = None
 
 app = FastAPI(
-    title="Fake Media Detector API",
-    description="AI misinformation detection, image manipulation detection, OCR extraction, and video frame analysis.",
+    title="SENTINEL — AI Content Detection",
+    description="Multimodal AI-generated content detection: text, image, audio, and video.",
     version="1.0.0",
 )
 
 UPLOAD_FOLDER = "uploads"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
+_STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 
 
 def _safe_path(filename: str) -> str:
@@ -42,7 +47,17 @@ def _safe_path(filename: str) -> str:
 
 @app.get("/")
 def root():
-    return {"message": "Fake Media Detector API running"}
+    """Serve the SENTINEL web UI."""
+    index_path = os.path.join(_STATIC_DIR, "index.html")
+    if os.path.isfile(index_path):
+        return FileResponse(index_path, media_type="text/html")
+    return {"message": "SENTINEL API running"}
+
+
+@app.get("/health")
+def health():
+    """Cloud Run health check endpoint."""
+    return {"status": "ok"}
 
 
 # ── Text Detection ────────────────────────────────────────────────────────────
@@ -212,3 +227,60 @@ async def full_analysis(text: str = Form(...)):
             results["insights"] = {"error": str(e)}
 
     return results
+
+
+# ── SSE Streaming Analysis ────────────────────────────────────────────────────
+
+@app.post("/analyse-stream")
+async def analyse_stream(text: str = Form(...)):
+    """
+    Run the full detection pipeline with Server-Sent Events streaming.
+    Emits step progress events and a final result event.
+    """
+
+    async def event_generator():
+        results = {"guard": None, "misinformation": None, "insights": None}
+
+        # Step 1: GUARD
+        yield {"event": "step", "data": json.dumps({"step": "guard", "status": "running"})}
+        if run_guard_detection is not None:
+            try:
+                results["guard"] = await run_guard_detection(text, source_lang="en")
+            except Exception as e:
+                results["guard"] = {"error": str(e)}
+        yield {"event": "step", "data": json.dumps({"step": "guard", "status": "done"})}
+
+        # Step 2: Misinformation
+        yield {"event": "step", "data": json.dumps({"step": "misinformation", "status": "running"})}
+        if detect_misinformation is not None:
+            try:
+                results["misinformation"] = await detect_misinformation(
+                    text, context_description="web_text"
+                )
+            except Exception as e:
+                results["misinformation"] = {"error": str(e)}
+        yield {"event": "step", "data": json.dumps({"step": "misinformation", "status": "done"})}
+
+        # Step 3: Insights
+        yield {"event": "step", "data": json.dumps({"step": "insights", "status": "running"})}
+        if run_insights is not None:
+            try:
+                results["insights"] = await run_insights(
+                    text,
+                    results["guard"] or {},
+                    misinformation_result=results["misinformation"],
+                )
+            except Exception as e:
+                results["insights"] = {"error": str(e)}
+        yield {"event": "step", "data": json.dumps({"step": "insights", "status": "done"})}
+
+        # Final result
+        yield {"event": "result", "data": json.dumps({"result": results})}
+
+    return EventSourceResponse(event_generator())
+
+
+# ── Static file serving (must be last to avoid shadowing API routes) ──────────
+
+if os.path.isdir(_STATIC_DIR):
+    app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")

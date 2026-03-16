@@ -1,0 +1,584 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SENTINEL — AI Content Detection</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #111827;
+      --surface: #1f2937;
+      --border: rgba(255,255,255,0.08);
+      --text: #e5e7eb;
+      --text-muted: #9ca3af;
+      --accent: #F97316;
+      --accent-glow: rgba(249,115,22,0.25);
+      --green: #22c55e;
+      --red: #ef4444;
+      --yellow: #eab308;
+      --font: 'JetBrains Mono', monospace;
+    }
+
+    body {
+      font-family: var(--font);
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      background-image: radial-gradient(rgba(255,255,255,0.03) 1px, transparent 1px);
+      background-size: 20px 20px;
+    }
+
+    /* ── Header ─────────────────────────────────────────────── */
+    header {
+      text-align: center;
+      padding: 2.5rem 1rem 1.5rem;
+      border-bottom: 1px solid var(--border);
+    }
+    header h1 {
+      font-size: 1.75rem;
+      font-weight: 700;
+      letter-spacing: 0.15em;
+      color: var(--accent);
+    }
+    header p {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      margin-top: 0.4rem;
+    }
+
+    /* ── Main container ─────────────────────────────────────── */
+    main {
+      max-width: 720px;
+      margin: 2rem auto;
+      padding: 0 1rem;
+    }
+
+    /* ── Input section ──────────────────────────────────────── */
+    .input-section {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.5rem;
+      margin-bottom: 1.5rem;
+    }
+    .input-section label {
+      display: block;
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--text-muted);
+      margin-bottom: 0.5rem;
+    }
+    textarea {
+      width: 100%;
+      min-height: 120px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.75rem;
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 0.85rem;
+      resize: vertical;
+    }
+    textarea:focus {
+      outline: none;
+      border-color: var(--accent);
+      box-shadow: 0 0 0 2px var(--accent-glow);
+    }
+
+    /* ── File upload ────────────────────────────────────────── */
+    .file-row {
+      display: flex;
+      gap: 0.75rem;
+      margin-top: 0.75rem;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .file-row input[type="file"] {
+      flex: 1;
+      min-width: 0;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.5rem 0.75rem;
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 0.8rem;
+    }
+
+    /* ── Buttons ────────────────────────────────────────────── */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      padding: 0.6rem 1.25rem;
+      border: none;
+      border-radius: 8px;
+      font-family: var(--font);
+      font-size: 0.8rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    .btn-primary {
+      background: var(--accent);
+      color: #fff;
+    }
+    .btn-primary:hover { background: #ea580c; }
+    .btn-primary:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    .btn-secondary {
+      background: transparent;
+      color: var(--text-muted);
+      border: 1px solid var(--border);
+    }
+    .btn-secondary:hover { border-color: var(--text-muted); }
+
+    .actions {
+      display: flex;
+      gap: 0.5rem;
+      margin-top: 1rem;
+      flex-wrap: wrap;
+    }
+
+    /* ── Progress steps ─────────────────────────────────────── */
+    .progress-steps {
+      display: none;
+      margin-bottom: 1.5rem;
+    }
+    .progress-steps.active { display: block; }
+    .step {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      padding: 0.5rem 0;
+      font-size: 0.8rem;
+      color: var(--text-muted);
+    }
+    .step .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--border);
+      flex-shrink: 0;
+    }
+    .step.running .dot {
+      background: var(--accent);
+      box-shadow: 0 0 6px var(--accent-glow);
+      animation: pulse 1s ease-in-out infinite;
+    }
+    .step.done .dot { background: var(--green); }
+    .step.done { color: var(--green); }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+
+    /* ── Result card ────────────────────────────────────────── */
+    .result-card {
+      display: none;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+    }
+    .result-card.active { display: block; }
+    .result-header {
+      padding: 1rem 1.5rem;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .result-header h3 {
+      font-size: 0.9rem;
+      font-weight: 600;
+    }
+    .badge {
+      display: inline-block;
+      padding: 0.2rem 0.6rem;
+      border-radius: 999px;
+      font-size: 0.7rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .badge-safe { background: rgba(34,197,94,0.15); color: var(--green); }
+    .badge-unsafe { background: rgba(239,68,68,0.15); color: var(--red); }
+    .badge-unknown { background: rgba(234,179,8,0.15); color: var(--yellow); }
+
+    .result-body {
+      padding: 1.25rem 1.5rem;
+    }
+    .result-section {
+      margin-bottom: 1.25rem;
+    }
+    .result-section:last-child { margin-bottom: 0; }
+    .result-section h4 {
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--text-muted);
+      margin-bottom: 0.4rem;
+    }
+    .result-section p, .result-section pre {
+      font-size: 0.82rem;
+      line-height: 1.6;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .detail-toggle {
+      cursor: pointer;
+      font-size: 0.75rem;
+      color: var(--accent);
+      margin-top: 0.6rem;
+      display: inline-block;
+    }
+    .detail-toggle:hover { text-decoration: underline; }
+    .detail-json {
+      display: none;
+      margin-top: 0.5rem;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.75rem;
+      font-size: 0.75rem;
+      max-height: 300px;
+      overflow-y: auto;
+    }
+    .detail-json.open { display: block; }
+
+    /* ── Footer ─────────────────────────────────────────────── */
+    footer {
+      text-align: center;
+      padding: 2rem 1rem;
+      font-size: 0.7rem;
+      color: var(--text-muted);
+    }
+
+    /* ── Error ──────────────────────────────────────────────── */
+    .error-banner {
+      display: none;
+      background: rgba(239,68,68,0.1);
+      border: 1px solid rgba(239,68,68,0.3);
+      border-radius: 8px;
+      padding: 0.75rem 1rem;
+      margin-bottom: 1rem;
+      font-size: 0.8rem;
+      color: var(--red);
+    }
+    .error-banner.active { display: block; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>&#x1F6E1; SENTINEL</h1>
+    <p>Multimodal AI-Generated Content Detection</p>
+  </header>
+
+  <main>
+    <!-- Input -->
+    <div class="input-section">
+      <label for="textInput">Paste text to analyse</label>
+      <textarea id="textInput" placeholder="Paste any text here to check for AI generation, misinformation, or manipulation signals…"></textarea>
+
+      <div class="file-row">
+        <input type="file" id="fileInput" accept="image/*,video/*,audio/*" />
+      </div>
+
+      <div class="actions">
+        <button class="btn btn-primary" id="analyseBtn" onclick="runAnalysis()">
+          &#9654; Analyse
+        </button>
+        <button class="btn btn-secondary" onclick="clearAll()">Clear</button>
+      </div>
+    </div>
+
+    <!-- Error -->
+    <div class="error-banner" id="errorBanner"></div>
+
+    <!-- Progress -->
+    <div class="progress-steps" id="progressSteps">
+      <div class="step" id="stepGuard"><span class="dot"></span> GUARD Safety Check</div>
+      <div class="step" id="stepMisinfo"><span class="dot"></span> Misinformation Detection</div>
+      <div class="step" id="stepInsights"><span class="dot"></span> Generating Insights</div>
+    </div>
+
+    <!-- Result -->
+    <div class="result-card" id="resultCard">
+      <div class="result-header">
+        <h3>Detection Result</h3>
+        <span class="badge" id="resultBadge"></span>
+      </div>
+      <div class="result-body" id="resultBody"></div>
+    </div>
+  </main>
+
+  <footer>
+    SENTINEL &middot; Built for the Gemini Live Agent Challenge &middot; Singapore 2026
+  </footer>
+
+  <script>
+    const textInput   = document.getElementById('textInput');
+    const fileInput   = document.getElementById('fileInput');
+    const analyseBtn  = document.getElementById('analyseBtn');
+    const errorBanner = document.getElementById('errorBanner');
+    const progressEl  = document.getElementById('progressSteps');
+    const resultCard  = document.getElementById('resultCard');
+    const resultBadge = document.getElementById('resultBadge');
+    const resultBody  = document.getElementById('resultBody');
+
+    function showError(msg) {
+      errorBanner.textContent = msg;
+      errorBanner.classList.add('active');
+    }
+    function hideError() { errorBanner.classList.remove('active'); }
+
+    function clearAll() {
+      textInput.value = '';
+      fileInput.value = '';
+      hideError();
+      progressEl.classList.remove('active');
+      resultCard.classList.remove('active');
+      resetSteps();
+    }
+
+    function resetSteps() {
+      document.querySelectorAll('.step').forEach(s => {
+        s.classList.remove('running', 'done');
+      });
+    }
+
+    function setStep(id, state) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.classList.remove('running', 'done');
+      if (state) el.classList.add(state);
+    }
+
+    /* ── File-based detection ────────────────────────────── */
+    async function runFileDetection(file) {
+      const form = new FormData();
+      form.append('file', file);
+
+      const isImage = file.type.startsWith('image/');
+      const isVideo = file.type.startsWith('video/');
+
+      let endpoint = '/detect-image';
+      if (isVideo) endpoint = '/detect-video';
+
+      setStep('stepGuard', 'running');
+      progressEl.classList.add('active');
+
+      const resp = await fetch(endpoint, { method: 'POST', body: form });
+      if (!resp.ok) throw new Error(`Server error: ${resp.status}`);
+      const data = await resp.json();
+
+      setStep('stepGuard', 'done');
+      setStep('stepMisinfo', 'done');
+      setStep('stepInsights', 'done');
+      return data;
+    }
+
+    /* ── Text-based SSE streaming detection ──────────────── */
+    function runTextDetection(text) {
+      return new Promise((resolve, reject) => {
+        resetSteps();
+        progressEl.classList.add('active');
+        setStep('stepGuard', 'running');
+
+        const form = new FormData();
+        form.append('text', text);
+
+        fetch('/analyse-stream', { method: 'POST', body: form })
+          .then(response => {
+            if (!response.ok) throw new Error(`Server error: ${response.status}`);
+
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+            let finalResult = null;
+
+            function read() {
+              reader.read().then(({ done, value }) => {
+                if (done) {
+                  resolve(finalResult || {});
+                  return;
+                }
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                buffer = lines.pop();
+
+                for (const line of lines) {
+                  if (line.startsWith('event: ')) {
+                    // SSE event type — parsed by name in the data handler below
+                  } else if (line.startsWith('data: ')) {
+                    try {
+                      const payload = JSON.parse(line.slice(6));
+                      if (payload.step) {
+                        // Step progress
+                        if (payload.step === 'guard') {
+                          setStep('stepGuard', 'done');
+                          setStep('stepMisinfo', 'running');
+                        } else if (payload.step === 'misinformation') {
+                          setStep('stepMisinfo', 'done');
+                          setStep('stepInsights', 'running');
+                        } else if (payload.step === 'insights') {
+                          setStep('stepInsights', 'done');
+                        }
+                      }
+                      if (payload.result) {
+                        finalResult = payload.result;
+                      }
+                      // Handle direct result format
+                      if (payload.guard !== undefined || payload.misinformation !== undefined) {
+                        finalResult = payload;
+                      }
+                    } catch (parseErr) {
+                      // Non-JSON SSE lines (e.g. comments, keep-alives) — skip
+                    }
+                  }
+                }
+                read();
+              }).catch(reject);
+            }
+            read();
+          })
+          .catch(reject);
+      });
+    }
+
+    /* ── Main analyse handler ─────────────────────────────── */
+    async function runAnalysis() {
+      hideError();
+      resultCard.classList.remove('active');
+      resetSteps();
+
+      const text = textInput.value.trim();
+      const file = fileInput.files[0];
+
+      if (!text && !file) {
+        showError('Please enter text or upload a file to analyse.');
+        return;
+      }
+
+      analyseBtn.disabled = true;
+
+      try {
+        let data;
+        if (file && !text) {
+          data = await runFileDetection(file);
+        } else {
+          // Text analysis (or text + file — prioritise text)
+          data = await runTextDetection(text);
+        }
+
+        renderResult(data);
+      } catch (err) {
+        showError(err.message || 'Analysis failed. Please try again.');
+      } finally {
+        analyseBtn.disabled = false;
+      }
+    }
+
+    /* ── Render result ────────────────────────────────────── */
+    function renderResult(data) {
+      resultCard.classList.add('active');
+
+      // Determine overall verdict
+      const guard = data.guard || data.analysis || {};
+      const misinfo = data.misinformation || {};
+      const insights = data.insights || {};
+
+      let verdict = 'unknown';
+      let badgeClass = 'badge-unknown';
+      let badgeText = '❓ Inconclusive';
+
+      if (guard.is_safe === true && !misinfo.misinformation_detected) {
+        verdict = 'safe';
+        badgeClass = 'badge-safe';
+        badgeText = '✅ Appears Safe';
+      } else if (guard.is_safe === false || misinfo.misinformation_detected) {
+        verdict = 'unsafe';
+        badgeClass = 'badge-unsafe';
+        badgeText = '🚨 Flagged';
+      }
+
+      resultBadge.className = 'badge ' + badgeClass;
+      resultBadge.textContent = badgeText;
+
+      // Build body
+      let html = '';
+
+      // Explanation
+      if (insights.explanation) {
+        html += `<div class="result-section">
+          <h4>Explanation</h4>
+          <p>${escapeHtml(insights.explanation)}</p>
+        </div>`;
+      }
+
+      // GUARD
+      if (guard.label || guard.is_safe !== undefined) {
+        html += `<div class="result-section">
+          <h4>GUARD Safety</h4>
+          <p>Safe: ${guard.is_safe ?? 'N/A'} &nbsp;|&nbsp; Label: ${escapeHtml(guard.label || 'N/A')}</p>
+        </div>`;
+      }
+
+      // Misinformation
+      if (misinfo.misinformation_detected !== undefined) {
+        html += `<div class="result-section">
+          <h4>Misinformation</h4>
+          <p>Detected: ${misinfo.misinformation_detected} &nbsp;|&nbsp; Type: ${escapeHtml(misinfo.misinformation_type || 'none')}</p>
+          ${misinfo.explanation ? `<p>${escapeHtml(misinfo.explanation)}</p>` : ''}
+        </div>`;
+      }
+
+      // Image / video analysis
+      if (data.analysis) {
+        const a = data.analysis;
+        if (a.caption || a.ai_signals) {
+          html += `<div class="result-section">
+            <h4>Visual Analysis</h4>
+            ${a.caption ? `<p>${escapeHtml(a.caption)}</p>` : ''}
+            ${a.ai_signals ? `<p><strong>AI Signals:</strong> ${escapeHtml(a.ai_signals)}</p>` : ''}
+          </div>`;
+        }
+      }
+
+      // Raw JSON toggle
+      const id = 'detail-' + Date.now();
+      html += `<span class="detail-toggle" onclick="toggleDetail('${id}')">Show raw JSON ▸</span>`;
+      html += `<pre class="detail-json" id="${id}">${escapeHtml(JSON.stringify(data, null, 2))}</pre>`;
+
+      resultBody.innerHTML = html;
+    }
+
+    function toggleDetail(id) {
+      const el = document.getElementById(id);
+      if (el) el.classList.toggle('open');
+    }
+
+    function escapeHtml(s) {
+      if (typeof s !== 'string') s = String(s ?? '');
+      const d = document.createElement('div');
+      d.textContent = s;
+      return d.innerHTML;
+    }
+
+    // Allow Ctrl+Enter to submit
+    textInput.addEventListener('keydown', e => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') runAnalysis();
+    });
+  </script>
+</body>
+</html>

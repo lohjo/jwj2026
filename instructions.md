@@ -74,18 +74,19 @@ python telegram_bot.py
 - `http://localhost:8080` serves only a health-check endpoint (any `GET`
   request returns `200 OK`) — it is **not** a full web UI.
 
-### Option B: FastAPI Detection API
+### Option B: FastAPI Web UI + Detection API
 
-This starts the REST API with endpoints for text, image, video, and
+This starts the web UI and REST API with endpoints for text, image, video, and
 misinformation detection.
 
 ```bash
 uvicorn app:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-- Open `http://localhost:8000` — you should see
-  `{"message": "Fake Media Detector API running"}`.
+- Open `http://localhost:8000` — you should see the **SENTINEL web interface**
+  where you can paste text or upload files to analyse.
 - Interactive API docs are at `http://localhost:8000/docs`.
+- Health check endpoint: `http://localhost:8000/health`.
 - The `--reload` flag watches for file changes and **automatically restarts**
   the server when you save a file.
 
