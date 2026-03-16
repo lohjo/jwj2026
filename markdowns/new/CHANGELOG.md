@@ -1,5 +1,25 @@
 # Changelog
 
+## Hackathon Compliance & Workshop Patterns (2026-03-16)
+
+### Summary
+This release brings SENTINEL to full hackathon compliance, applies workshop patterns from the Google Multimodal Agent Workshop, and updates all markdown documentation to reflect the current architecture.
+
+### Hackathon compliance fixes
+- Fixed `verify_hackathon.py` to accept both `end_of_turn` and `turn_complete` signalling keywords — resolves 2 false FAIL checks.
+- Added `GEMINI_LIVE_MODEL`, `GEMINI_LIVE_VOICE`, and Vertex AI entries to `.env.example`.
+- Fixed `GEMINI_MODEL` default in `.env.example` from `gemini-1.5-flash` to `gemini-2.5-flash`.
+
+### Workshop pattern implementations
+- **Dockerfile hardening** (Pattern 5): Added `PYTHONDONTWRITEBYTECODE=1`, `PYTHONUNBUFFERED=1`, `--no-install-recommends`, and `HEALTHCHECK` directive.
+- **Cloud Build modernisation** (Pattern 6): Migrated `cloudbuild.yaml` from `gcr.io` to Artifact Registry, added dual tagging (`BUILD_ID` + `latest`), step IDs with `waitFor` dependencies, container labels, and substitution variables.
+- **GCP bootstrap script** (Pattern 8): Added `setup-gcp.sh` — idempotent script that enables required GCP APIs and creates the Artifact Registry repository.
+
+### Documentation updates
+- `ARCHITECTURE.md`: Added Gemini Live API section, updated model registry to current models (`gemini-2.5-flash`, `gemini-2.5-flash-native-audio-latest`), added `media/live.py` to dependency graph and flow diagram, added workshop patterns compliance notes.
+- `CONTRIBUTING.md`: Added Live API testing rules, Dockerfile/cloudbuild best practices, GCP setup guidance, and `verify_hackathon.py` to PR checklist.
+- `CHANGELOG.md`: Added this release entry.
+
 ## Refactor Release (2026-03-10)
 
 ### Summary
