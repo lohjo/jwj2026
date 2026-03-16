@@ -65,6 +65,51 @@ The bot returns an HTML-formatted verdict, confidence score, and explanation.
 python -m pytest tests/ -v
 ```
 
+## Hackathon Compliance
+
+SENTINEL's backend is deployed on Google Cloud Run (asia-southeast1, service ID: `sentinel`). It uses the Gemini Live API (`gemini-2.0-flash-live-001`) via WebSocket for real-time spoken verdict delivery, and `gemini-2.5-flash` via the Google GenAI SDK for content analysis. The agent pipeline is orchestrated using Google ADK.
+
+### Key evidence files
+
+| Requirement | Evidence |
+|---|---|
+| Gemini model | `config.py` — `GEMINI_MODEL`, `GEMINI_LIVE_MODEL` |
+| Google GenAI SDK | `media/live.py` — `from google import genai` |
+| Google ADK | `pipeline/sdk_runner.py`, `requirements.txt` |
+| GCP hosting | `Dockerfile`, `cloudbuild.yaml`, `verify_gcp.py` |
+| Gemini Live API | `media/live.py` — `client.aio.live.connect()` |
+| Multimodal I/O | `telegram_bot.py` — text, image, audio, video handlers |
+
+### Deploy to Cloud Run
+
+```bash
+# Prerequisites
+gcloud auth login
+gcloud config set project YOUR_PROJECT_ID
+gcloud config set run/region asia-southeast1
+
+# Deploy
+gcloud run deploy sentinel \
+  --source . \
+  --region asia-southeast1 \
+  --memory 2Gi --cpu 2 --timeout 300 \
+  --set-env-vars "TELEGRAM_TOKEN=$TELEGRAM_TOKEN" \
+  --set-env-vars "GEMINI_API_KEY=$GEMINI_API_KEY" \
+  --set-env-vars "OPENAI_API_KEY=$OPENAI_API_KEY"
+
+# Verify
+gcloud run services describe sentinel \
+  --region asia-southeast1 \
+  --format="value(status.url)"
+```
+
+### Verify hackathon compliance
+
+```bash
+python verify_hackathon.py   # offline code checks (45+ checks)
+python verify_gcp.py         # prints K_SERVICE/K_REVISION when on Cloud Run
+```
+
 ## Interesting Techniques
 
 - Asynchronous orchestration with Python `async`/`await` and `asyncio.gather` for parallel detection stages:
