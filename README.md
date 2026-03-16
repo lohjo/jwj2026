@@ -65,6 +65,12 @@ The bot returns an HTML-formatted verdict, confidence score, and explanation.
 python -m pytest tests/ -v
 ```
 
+### 6. Verify open-source enhancement status
+
+```bash
+python verify_open_source_enhancements.py
+```
+
 ## Hackathon Compliance
 
 SENTINEL's backend is deployed on Google Cloud Run (asia-southeast1, service ID: `sentinel`). It uses the Gemini Live API (`gemini-2.5-flash-native-audio-latest`) via WebSocket for real-time spoken verdict delivery, and `gemini-2.5-flash` via the Google GenAI SDK for content analysis. The agent pipeline is orchestrated using Google ADK.
