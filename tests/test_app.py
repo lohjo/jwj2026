@@ -60,6 +60,9 @@ def test_root_html_copy_helpers_are_event_safe(client):
     assert "function copyResults(clickEvent)" in res.text
     assert "function copyImageResults(clickEvent)" in res.text
     assert "if (!btn) return;" in res.text
+    assert "if (!body || !toggle) return;" in res.text
+    assert "if (!box || !toggle) return;" in res.text
+    assert "if (!detailsEl || !verdictEl || !transcriptEl || !resultsEl) return;" in res.text
 
 
 # ---------------------------------------------------------------------------
