@@ -8,6 +8,8 @@ import asyncio
 import logging
 import os
 import sys
+import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 
 from telegram import Update
@@ -28,6 +30,7 @@ from pipeline.formatter import format_detection_message
 from pipeline.logger import log_to_clickhouse
 from media.image import extract_text_from_image, analyse_image_with_gemini, detect_image_manipulation
 from media.audio import transcribe_audio, synthesise_speech
+from media import live
 from media.video import analyse_video
 
 logging.basicConfig(level=logging.INFO)
@@ -505,15 +508,30 @@ async def handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         )
         await update.message.reply_text(response, parse_mode="HTML")
 
-        # Step 8: TTS voice reply
+        # Step 8: Voice reply — try Gemini Live API first, fall back to ElevenLabs
         try:
-            tts_path = f"downloads/tts_{audio.file_id}.mp3"
-            tts_output = await synthesise_speech(explanation, tts_path, language=source_lang)
-            if tts_output:
+            with open(audio_path, "rb") as f:
+                raw_audio = f.read()
+            live_ogg = await live.live_voice_exchange(
+                audio_bytes=raw_audio,
+                mime_type="audio/ogg" if ext == ".ogg" else "audio/mpeg",
+                system_context=explanation,
+            )
+            if live_ogg:
+                tts_path = f"downloads/live_{audio.file_id}.ogg"
+                with open(tts_path, "wb") as f:
+                    f.write(live_ogg)
                 with open(tts_path, "rb") as voice_file:
                     await update.message.reply_voice(voice=voice_file)
+            else:
+                # Fallback to ElevenLabs TTS
+                tts_path = f"downloads/tts_{audio.file_id}.mp3"
+                tts_output = await synthesise_speech(explanation, tts_path, language=source_lang)
+                if tts_output:
+                    with open(tts_path, "rb") as voice_file:
+                        await update.message.reply_voice(voice=voice_file)
         except Exception:
-            logger.info("TTS reply skipped — ElevenLabs unavailable or failed")
+            logger.info("TTS reply skipped — Live API and ElevenLabs both unavailable")
 
         # Background tasks
         asyncio.create_task(
@@ -653,6 +671,34 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                 pass
 
 
+# ── Cloud Run health check server ─────────────────────────────────────
+
+class _HealthHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"OK")
+
+    def log_message(self, format, *args):
+        pass  # suppress access logs
+
+
+def _start_health_server():
+    """Start a minimal HTTP server on PORT for Cloud Run health checks."""
+    port = int(os.environ.get("PORT", "8080"))
+    try:
+        server = HTTPServer(("0.0.0.0", port), _HealthHandler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        logger.info("Health check server listening on port %d", port)
+    except OSError as exc:
+        logger.warning(
+            "Health check server could not bind to port %d: %s. "
+            "Bot will continue without health endpoint.",
+            port, exc,
+        )
+
+
 # ── Bot startup ───────────────────────────────────────────────────────
 
 def start_bot():
@@ -660,6 +706,9 @@ def start_bot():
     if not TELEGRAM_TOKEN:
         logger.error("TELEGRAM_TOKEN not set — cannot start bot")
         sys.exit(1)
+
+    # Cloud Run requires a listening port for health checks
+    _start_health_server()
 
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
     app.add_handler(CommandHandler("start", start_command))
@@ -672,7 +721,7 @@ def start_bot():
     app.add_handler(MessageHandler(filters.VIDEO | filters.VIDEO_NOTE, handle_video))
 
     logger.info("Starting Telegram bot polling...")
-    app.run_polling()
+    app.run_polling(bootstrap_retries=5)
 
 
 if __name__ == "__main__":

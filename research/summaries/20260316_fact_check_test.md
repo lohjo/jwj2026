@@ -1,0 +1,3 @@
+```json
+{
+  "summary_md": "# fact check: test]\n\n## Overview\nFact-checking involves verifying the accuracy of claims and information, particularly in political discourse and online content. Multiple organizations and tools are dedicated to assisting individuals in critically evaluating information sources and identifying misinformation.\n\n## Key Findings\n*   **Dedicated Fact-Checking Websites:**\n    *   **
