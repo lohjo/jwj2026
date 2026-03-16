@@ -5,29 +5,36 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SENTINEL — AI Content Detection</title>
     <style>
-        /* ── ContextGuard-inspired design tokens ────────────────────── */
+        /* ── SENTINEL design tokens (Impeccable /colorize) ──────────── */
         :root {
-            --bg-primary: #0a0b0f;
-            --bg-secondary: #141519;
-            --bg-card: rgba(255, 255, 255, 0.025);
-            --bg-card-hover: rgba(255, 255, 255, 0.05);
-            --bg-input: rgba(0, 0, 0, 0.3);
-            --text-primary: #e2e4ea;
-            --text-secondary: rgba(255, 255, 255, 0.55);
-            --text-tertiary: rgba(255, 255, 255, 0.35);
-            --text-muted: rgba(255, 255, 255, 0.25);
-            --accent: #3b82f6;
-            --accent-hover: #2563eb;
+            --bg-primary: #111827;
+            --bg-secondary: #1a2233;
+            --bg-card: rgba(249, 115, 22, 0.03);
+            --bg-card-hover: rgba(249, 115, 22, 0.06);
+            --bg-input: rgba(0, 0, 0, 0.25);
+            --text-primary: #e8ecf4;
+            --text-secondary: rgba(232, 236, 244, 0.65);
+            --text-tertiary: rgba(232, 236, 244, 0.45);
+            --text-muted: rgba(232, 236, 244, 0.3);
+            --accent: #F97316;
+            --accent-hover: #ea580c;
             --success: #22c55e;
             --warning: #f59e0b;
             --danger: #ef4444;
-            --border: rgba(255, 255, 255, 0.06);
-            --border-active: rgba(255, 255, 255, 0.1);
+            --border: rgba(249, 115, 22, 0.08);
+            --border-active: rgba(249, 115, 22, 0.18);
             --radius: 12px;
             --risk-critical: #ef4444;
             --risk-high: #f59e0b;
-            --risk-medium: #3b82f6;
+            --risk-medium: #F97316;
             --risk-low: #22c55e;
+            /* Spacing scale (4pt base grid — Impeccable /distill) */
+            --space-xs: 4px;
+            --space-sm: 8px;
+            --space-md: 16px;
+            --space-lg: 24px;
+            --space-xl: 32px;
+            --space-2xl: 48px;
         }
 
         * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -39,18 +46,18 @@
             min-height: 100vh;
         }
 
-        /* Dot grid background (ContextGuard pattern) */
+        /* Dot grid background */
         body::before {
             content: "";
             position: fixed;
             inset: 0;
-            background-image: radial-gradient(rgba(255, 255, 255, 0.015) 1px, transparent 1px);
+            background-image: radial-gradient(rgba(249, 115, 22, 0.04) 1px, transparent 1px);
             background-size: 32px 32px;
             pointer-events: none;
             z-index: 0;
         }
 
-        ::selection { background: rgba(59, 130, 246, 0.3); }
+        ::selection { background: rgba(249, 115, 22, 0.3); }
 
         @keyframes fadeIn {
             from { opacity: 0; }
@@ -66,8 +73,20 @@
         }
         @keyframes spin { to { transform: rotate(360deg); } }
         @keyframes micPulse {
-            0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); }
-            50% { box-shadow: 0 0 0 20px rgba(239, 68, 68, 0); }
+            0%, 100% { box-shadow: 0 0 0 0 rgba(249, 115, 22, 0.4); }
+            50% { box-shadow: 0 0 0 20px rgba(249, 115, 22, 0); }
+        }
+        /* Impeccable /animate — staggered entrance for cards */
+        @keyframes cardEntrance {
+            from { opacity: 0; transform: translateY(12px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        /* Reduced motion support */
+        @media (prefers-reduced-motion: reduce) {
+            *, *::before, *::after {
+                animation-duration: 0.01ms !important;
+                transition-duration: 0.01ms !important;
+            }
         }
 
         .container {
@@ -109,7 +128,7 @@
             font-size: 36px;
             font-weight: 900;
             letter-spacing: -0.02em;
-            background: linear-gradient(135deg, #e2e4ea 0%, #8b8fa3 100%);
+            background: linear-gradient(135deg, #F97316 0%, #ea580c 50%, #e8ecf4 100%);
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
             margin-bottom: 0.25rem;
@@ -146,9 +165,9 @@
         .tab:hover { border-color: var(--border-active); color: var(--text-secondary); }
 
         .tab.active {
-            background: rgba(239, 68, 68, 0.1);
-            color: var(--danger);
-            border-color: rgba(239, 68, 68, 0.3);
+            background: rgba(249, 115, 22, 0.1);
+            color: var(--accent);
+            border-color: rgba(249, 115, 22, 0.3);
         }
 
         .panel { display: none; }
@@ -161,7 +180,8 @@
             border-radius: var(--radius);
             padding: 1.5rem;
             margin-bottom: 1.25rem;
-            transition: all 0.3s ease;
+            transition: border-color 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+            animation: cardEntrance 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
         }
 
         .card:hover {
@@ -203,8 +223,8 @@
         }
 
         textarea:focus, input[type="text"]:focus {
-            border-color: rgba(239, 68, 68, 0.3);
-            box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.08);
+            border-color: rgba(249, 115, 22, 0.3);
+            box-shadow: 0 0 0 2px rgba(249, 115, 22, 0.08);
         }
 
         textarea { min-height: 160px; }
@@ -229,17 +249,18 @@
             font-weight: 700;
             letter-spacing: 0.03em;
             cursor: pointer;
-            transition: all 0.2s;
+            transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
         }
 
         .btn-primary {
-            background: linear-gradient(135deg, #ef4444, #dc2626);
+            background: linear-gradient(135deg, #F97316, #ea580c);
             color: white;
-            box-shadow: 0 4px 24px rgba(239, 68, 68, 0.25);
+            box-shadow: 0 4px 24px rgba(249, 115, 22, 0.25);
         }
 
-        .btn-primary:hover { filter: brightness(1.1); }
-        .btn-primary:disabled { opacity: 0.4; cursor: not-allowed; filter: none; }
+        .btn-primary:hover { filter: brightness(1.1); transform: translateY(-1px); }
+        .btn-primary:active { transform: translateY(0); }
+        .btn-primary:disabled { opacity: 0.4; cursor: not-allowed; filter: none; transform: none; }
 
         .btn-secondary {
             background: transparent;
@@ -266,8 +287,8 @@
         }
 
         .file-upload:hover {
-            border-color: rgba(239, 68, 68, 0.4);
-            background: rgba(239, 68, 68, 0.03);
+            border-color: rgba(249, 115, 22, 0.4);
+            background: rgba(249, 115, 22, 0.03);
         }
 
         .file-upload input[type="file"] {
@@ -301,7 +322,7 @@
         .processing-header .dot {
             width: 8px; height: 8px;
             border-radius: 50%;
-            background: var(--danger);
+            background: var(--accent);
             animation: pulse 1s infinite;
         }
 
@@ -309,7 +330,7 @@
             font-family: 'JetBrains Mono', 'Fira Code', monospace;
             font-size: 12px;
             letter-spacing: 0.06em;
-            color: var(--danger);
+            color: var(--accent);
         }
 
         .pipeline-step {
@@ -349,7 +370,7 @@
             display: inline-block;
             width: 8px; height: 8px;
             border-radius: 50%;
-            background: var(--danger);
+            background: var(--accent);
             animation: pulse 1s infinite;
         }
 
@@ -363,6 +384,7 @@
             display: flex;
             align-items: center;
             gap: 1rem;
+            animation: fadeInUp 0.4s cubic-bezier(0.16, 1, 0.3, 1) both;
         }
 
         .verdict-card.safe {
@@ -442,14 +464,16 @@
             border-radius: 10px;
             margin-bottom: 0.75rem;
             overflow: hidden;
-            transition: all 0.3s ease;
+            transition: border-color 0.25s cubic-bezier(0.16, 1, 0.3, 1),
+                        background 0.25s cubic-bezier(0.16, 1, 0.3, 1),
+                        transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+            animation: cardEntrance 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
         }
 
         .detail-card:hover {
             background: var(--bg-card-hover);
             border-color: var(--border-active);
             transform: translateY(-1px);
-            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
         }
 
         .detail-header {
@@ -663,11 +687,11 @@
             transition: all 0.3s;
         }
 
-        .mic-button:hover { border-color: rgba(239, 68, 68, 0.4); transform: scale(1.05); }
+        .mic-button:hover { border-color: rgba(249, 115, 22, 0.4); transform: scale(1.05); }
 
         .mic-button.recording {
-            border-color: var(--danger);
-            background: rgba(239, 68, 68, 0.1);
+            border-color: var(--accent);
+            background: rgba(249, 115, 22, 0.1);
             animation: micPulse 1.5s infinite;
         }
 
@@ -682,8 +706,8 @@
             text-align: center;
         }
 
-        .voice-status.recording { color: var(--danger); }
-        .voice-status.processing { color: var(--accent); }
+        .voice-status.recording { color: var(--accent); }
+        .voice-status.processing { color: var(--warning); }
 
         .audio-player { width: 100%; max-width: 400px; margin-top: 1rem; }
         .audio-player audio { width: 100%; border-radius: 8px; }
