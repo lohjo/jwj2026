@@ -1,0 +1,44 @@
+[
+  {
+    "index": 1,
+    "url": "https://www.cancer.org/research/acs-research-news/coffee-and-cancer-what-the-research-really-shows.html",
+    "domain": "www.cancer.org",
+    "word_count": 1062,
+    "fetched_at": "2026-03-17T05:19:31.860395"
+  },
+  {
+    "index": 2,
+    "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC9916720/",
+    "domain": "pmc.ncbi.nlm.nih.gov",
+    "word_count": 14796,
+    "fetched_at": "2026-03-17T05:19:31.861800"
+  },
+  {
+    "index": 3,
+    "url": "https://www.aicr.org/news/coffee-doesnt-need-to-carry-a-cancer-warning-scientists-say-it-protects-from-cancer/",
+    "domain": "www.aicr.org",
+    "word_count": 1697,
+    "fetched_at": "2026-03-17T05:19:31.862444"
+  },
+  {
+    "index": 4,
+    "url": "https://healthcare.utah.edu/huntsmancancerinstitute/news/2025/02/coffee-caffeine-and-cancer-everything-we-do-and-dont-know",
+    "domain": "healthcare.utah.edu",
+    "word_count": 681,
+    "fetched_at": "2026-03-17T05:19:31.862845"
+  },
+  {
+    "index": 5,
+    "url": "https://news.harvard.edu/gazette/story/2020/09/coffee-linked-to-improved-survival-in-metastatic-colorectal-cancer/",
+    "domain": "news.harvard.edu",
+    "word_count": 868,
+    "fetched_at": "2026-03-17T05:19:31.863246"
+  },
+  {
+    "index": 6,
+    "url": "https://www.moffitt.org/endeavor/archive/new-study-shows-drinking-coffee-does-not-affect-your-cancer-risks/",
+    "domain": "www.moffitt.org",
+    "word_count": 766,
+    "fetched_at": "2026-03-17T05:19:31.863702"
+  }
+]

@@ -1,0 +1,37 @@
+[Skip to nav](https://www.moffitt.org/endeavor/archive/new-study-shows-drinking-coffee-does-not-affect-your-cancer-risks/#menu-mobile) [Skip to content](https://www.moffitt.org/endeavor/archive/new-study-shows-drinking-coffee-does-not-affect-your-cancer-risks/#main-content)
+
+![](https://www.moffitt.org/contentassets/983c557988da42c2b78197633ec6bb3d/coffee-and-cancer-lg.jpg)
+
+# New Study Shows Drinking Coffee Does Not Affect Your Cancer Risks
+
+July 29, 2019
+
+Research studies on coffee and its potential impact on cancer risk seemingly outnumber baristas’ beans, with claims that are hard to keep track of.
+
+But a recent, large study says drinking coffee won’t change your risk of developing or dying from cancer.
+
+"We know that coffee is one of the most popular drinks in the world, and there continue to be mixed messages about the role it plays in disease," said Associate Professor Stuart MacGregor, the study’s senior author and head of the Statistical Genetics Group at QIMR Berghofer Medical Research Institute in Queensland, Australia.
+
+MacGregor notes that a preference for coffee is heritable, and this allowed for a Mendelian randomization study to see if cancer rates differed between people who self-reported coffee consumption versus those with a predisposition to drink coffee.
+
+"We found there was no real relationship between how many cups of coffee a person had a day and if they developed any particular cancers,” said MacGregor. "The study also ruled out a link between coffee intake and dying from the disease."
+
+The findings, published in the [_International Journal of Epidemiology_](https://academic.oup.com/ije/advance-article-abstract/doi/10.1093/ije/dyz144/5532583?redirectedFrom=fulltext) this July, were based on data from more than 300,000 white British participants in the UK Biobank project.  UK Biobank volunteers provide detailed information about themselves as well as baseline health data and samples. They agree to be followed for a variety of health issues. The QIMR study drew coffee consumption and cancer data from the UK Biobank cohort for more than 46,000 people who’d been diagnosed with various invasive cancers, including 7,000 who had died from the disease. Another 270,000 UK Biobank participants who had never been diagnosed with cancer served as the control group.
+
+So, does this put to rest the question of coffee’s potential to increase cancer risks?
+
+![](https://www.moffitt.org/contentassets/983c557988da42c2b78197633ec6bb3d/egankathleen_3841.jpg)
+
+Dr. Kathleen Egan, senior member of Cancer Epidemiology at Moffitt Cancer Center.
+
+[Kathleen Egan](https://www.moffitt.org/research-science/researchers/kathleen-egan/), ScD, senior member of Cancer Epidemiology at Moffitt Cancer Center says it should at least quell concerns around the most commonly studied cancers, including breast, ovarian, lung and prostate cancers. Dr. Egan’s research focuses on lifestyle-directed cancer prevention, including the impact of BMI, smoking, alcohol consumption and makeup of the gut microbiome on risks for melanoma, breast, ovarian and certain brain cancers.
+
+“There has never been much worry that coffee contributes to cancer risk based on modern epidemiologic research and especially gold-standard prospective studies like this one that dispelled worry that coffee consumption increases cancer in humans,” Egan said.
+
+What about coffee’s potential to protect against certain cancers? Some of coffee’s bioactive ingredients have shown anti-tumor effects in animal studies. But human research studies to date have produced conflicting findings for cancer overall and for specific malignancies like breast and prostate cancer.
+
+QIMR Berghofer lead researcher Jue-Sheng Ong said this study also looked at some common individual cancers such as breast, ovarian, lung and prostate cancers and found drinking coffee did not increase or decrease their incidence.
+
+"There was some inconclusive evidence about colorectal cancer, where those who reported drinking a lot of coffee had a slightly lower risk of developing cancer, but conversely examination of data from those people with a higher [genetic predisposition](https://medicalxpress.com/tags/genetic+predisposition/) to drink more coffee seemed to indicate a greater risk of developing the disease," Ong said. However, Egan points out that the follow up time in the cohort was relatively brief, and it is possible that some persons with an imminent colorectal cancer diagnosis changed their coffee consumption just prior to joining the cohort which would have distorted findings for self-reported coffee consumption. The disparity in those findings would suggest more research is needed to clarify if there is any relationship between colorectal cancer and coffee.
+
+Egan adds that other, less common cancers such as brain tumors could not be studied individually due to small numbers of cases that were diagnosed during the short period of follow up in the study.  Further studies of coffee’s effect on the

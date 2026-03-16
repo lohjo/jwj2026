@@ -1,94 +1,305 @@
-# jwjBot
+# SENTINEL
 
-jwjBot is a multimodal AI-generated content detection system built around a Telegram bot workflow. It analyzes text, images, audio, and video, then returns a structured verdict with confidence and explanation.
+### Full-Spectrum Information Integrity Platform for Singapore
 
-The runtime is modular:
-- [telegram_bot.py](telegram_bot.py) for handlers
-- [pipeline/](pipeline/) for detection, translation, formatting, and logging
-- [media/](media/) for image/audio/video processing
-- [research_agent/](research_agent/) for Firecrawl-based research enrichment
-- [config.py](config.py) as the only environment-variable access layer
+> **Gemini Live Agent Challenge:** A multimodal AI content detection system that analyses text, images, audio, and video for signs of AI generation, misinformation, and manipulation — and proactively predicts what misinformation will emerge from official announcements before it spreads.
 
-## User Instructions
+---
 
-### 1. Set up your environment
+## The Problem
 
-1. Create and activate a Python virtual environment.
-2. Install dependencies:
+Singapore faces two information integrity challenges:
+
+1. **Reactive gap** — Fact-checking happens *after* misinformation has already spread. Users receive forwarded voice notes, manipulated images, and AI-generated text with no way to verify them quickly.
+
+2. **Proactive gap** — Every government announcement creates an information vacuum. In February 2020, a DORSCON Orange advisory led to rice-shortage rumours on WhatsApp within 2 hours. MOH's correction came 8 hours too late — 300,000 people had already panic-bought.
+
+## Our Solution
+
+SENTINEL closes both gaps:
+
+```mermaid
+flowchart LR
+    subgraph Reactive["🛡️ Reactive Detection"]
+        R1["User sends content\n(text / image / audio / video)"]
+        R2["AI-generation verdict\n+ confidence score\n+ spoken explanation"]
+        R1 --> R2
+    end
+
+    subgraph Proactive["🔮 Proactive Prediction"]
+        P1["Comms officer pastes\nannouncement draft"]
+        P2["Predicted false narratives\n+ counter-narratives in 4 languages\n+ one-click deployment"]
+        P1 --> P2
+    end
+
+    style Reactive fill:#1e1b4b,stroke:#6366f1,color:#c7d2fe
+    style Proactive fill:#14532d,stroke:#22c55e,color:#bbf7d0
+```
+
+---
+
+## Tech Stack
+
+| Layer | Technology | Purpose |
+|-------|-----------|---------|
+| **Runtime** | Python 3.11+ | Async-first backend |
+| **Bot** | python-telegram-bot ≥21.0 | Telegram handlers (primary interface) |
+| **Web** | FastAPI + Uvicorn | REST, SSE streaming, WebSocket |
+| **Primary LLM** | Gemini 2.5 Flash | Detection, prediction, counter-narratives |
+| **Live Audio** | Gemini 2.5 Flash Native Audio | Bidirectional STT+TTS via WebSocket |
+| **Safety Guard** | SEA-LION GUARD (AI Singapore) | AI-generation + safety classification |
+| **Translation** | SEA-LION Gemma 27B-IT | EN↔ZH/MS/TA/Singlish |
+| **Embeddings** | Gemini `embedding-001` | 768-dim vectors for RAG |
+| **Database** | ClickHouse | Telemetry + vector search (cosineDistance) |
+| **Speech** | Deepgram Nova-2 / ElevenLabs | STT + TTS (fallback) |
+| **Vision** | Gemini Vision + OpenCV + Tesseract | OCR, manipulation, frame analysis |
+| **Scraping** | Firecrawl | POFMA, CNA, MOH source retrieval |
+| **Hosting** | Google Cloud Run | asia-southeast1, managed containers |
+
+---
+
+## Architecture
+
+```mermaid
+flowchart TB
+    subgraph Entry["Entry Points"]
+        TG["Telegram Bot\n/detect · /predict · media"]
+        WEB["Web Dashboard\nSSE streaming · WebSocket audio"]
+    end
+
+    TG & WEB --> Router
+
+    subgraph Router["Request Router"]
+        direction LR
+        DET["Detect\n(text/image/audio/video)"]
+        PRED["Predict\n(announcement)"]
+    end
+
+    DET --> Reactive
+    PRED --> Proactive
+
+    subgraph Reactive["Reactive Pipeline"]
+        G["GUARD\nSEA-LION"]
+        M["Misinfo\nGemini"]
+        IM["Manipulation\nOpenCV"]
+        INS["Insights\nGemini → Groq"]
+        G & M & IM --> INS
+    end
+
+    subgraph Proactive["Proactive Pipeline"]
+        TE["Topic Extraction\nGemini structured JSON"]
+        SR["Source Retrieval\n(parallel)"]
+        FC["Firecrawl\nPOFMA · CNA · MOH"]
+        RAG["ClickHouse RAG\nHistorical vectors"]
+        RP["Rumour Prediction\nGemini structured JSON"]
+        TE --> SR
+        SR --> FC & RAG
+        FC & RAG --> RP
+    end
+
+    Reactive --> Reply
+    Proactive --> Reply
+
+    subgraph Reply["Response"]
+        TR["Translation\nSEA-LION Gemma"]
+        FMT["Formatter\nHTML"]
+        LIVE["Gemini Live API\nSpoken verdict"]
+        DEPLOY["Telegram Deploy\nCounter-narratives"]
+        TR --> FMT & LIVE & DEPLOY
+    end
+
+    Reply --> LOG["ClickHouse\nTelemetry + RAG"]
+
+    style Entry fill:#1e1b4b,stroke:#6366f1,color:#c7d2fe
+    style Reactive fill:#172554,stroke:#3b82f6,color:#bfdbfe
+    style Proactive fill:#14532d,stroke:#22c55e,color:#bbf7d0
+    style Reply fill:#3b0764,stroke:#a855f7,color:#e9d5ff
+```
+
+---
+
+## How It Works
+
+### Reactive Detection
+
+Users send content via Telegram or the web dashboard. SENTINEL detects AI-generated content, misinformation, and image manipulation using parallel detection modules, then returns a verdict with confidence score and explanation — including a spoken verdict via Gemini Live API for voice notes.
+
+```mermaid
+flowchart LR
+    A["📱 User sends\ncontent"] --> B["🌐 Language\nDetection"]
+    B --> C["🔄 Translate\nto English"]
+    C --> D["⚡ Parallel Detection"]
+
+    subgraph D["Parallel Detection"]
+        D1["GUARD\n(AI safety)"]
+        D2["Misinfo\n(LLM analysis)"]
+        D3["Manipulation\n(OpenCV)"]
+    end
+
+    D --> E["💡 Insights\n(LLM explanation)"]
+    E --> F["🔄 Translate\nback"]
+    F --> G["📨 HTML verdict\n+ voice note"]
+
+    style D fill:#172554,stroke:#3b82f6,color:#bfdbfe
+```
+
+**Supported inputs:**
+- **Text** — Direct messages or `/detect <text>` command
+- **Images** — Gemini Vision OCR + AI-signal detection + OpenCV manipulation heuristics
+- **Audio** — Deepgram STT → detection pipeline → Gemini Live API spoken verdict
+- **Video** — OpenCV frame extraction → Gemini Vision per-frame → audio transcription
+
+### Proactive Prediction
+
+Communications officers paste an official announcement and receive a rumour forecast — predicted false narratives ranked by virality risk, with counter-narratives ready in 4 languages.
+
+```mermaid
+flowchart TD
+    A["📋 Announcement draft"] --> B["🔍 Extract Topics\ntopics · communities · triggers"]
+    B --> C{"Retrieve Sources\n(parallel)"}
+    C --> D["🌐 Firecrawl\nPOFMA · CNA · MOH"]
+    C --> E["📚 ClickHouse RAG\nHistorical articles"]
+    D & E --> F["🧠 Predict Rumours\n3-8 predictions ranked by risk"]
+    F --> G["📊 Results"]
+
+    subgraph G["Rumour Forecast"]
+        G1["🔴 CRITICAL — Rice shortage rumour\n📱 WhatsApp Mandarin · ~2hrs"]
+        G2["🟠 HIGH — Toilet paper panic\n📱 Cross-language WhatsApp · ~4hrs"]
+        G3["🟡 MEDIUM — Government hiding cases\n📱 Twitter/Reddit · ~6hrs"]
+    end
+
+    G --> H["✅ Deploy counter-narratives\nEN · 中文 · BM · தமிழ்\n→ 800+ community leaders"]
+
+    style G1 fill:#7f1d1d,stroke:#dc2626,color:#fca5a5
+    style G2 fill:#7c2d12,stroke:#ea580c,color:#fed7aa
+    style G3 fill:#713f12,stroke:#ca8a04,color:#fef08a
+    style H fill:#14532d,stroke:#22c55e,color:#bbf7d0
+```
+
+### Hybrid RAG
+
+SENTINEL uses a two-phase RAG approach combining topic relevance with vector similarity over a ClickHouse-hosted corpus of Singapore misinformation articles:
+
+```mermaid
+flowchart LR
+    A["📄 Announcement"] --> B["Gemini Embedding\n768-dim vector"]
+    B --> C["Phase 1\nTopic Filter\n+ cosineDistance"]
+    B --> D["Phase 2\nPure Vector\ncosineDistance"]
+    C & D --> E["Dedup & Merge\nTopic-matched first"]
+    E --> F["Credibility-weighted\nRAG Sources"]
+
+    style A fill:#1e1b4b,stroke:#6366f1,color:#c7d2fe
+    style F fill:#14532d,stroke:#22c55e,color:#bbf7d0
+```
+
+**Credibility scoring:** Government (0.95) > Established media (0.90) > Forums (0.70) > Community (0.50). High-credibility sources inform counter-narratives; low-credibility sources reveal actual rumour language patterns.
+
+---
+
+## Getting Started
+
+### Prerequisites
+
+- Python 3.11+
+- ffmpeg (for audio/video processing)
+- ClickHouse instance (local or [ClickHouse Cloud](https://clickhouse.cloud))
+
+### Installation
 
 ```bash
+# Clone the repository
+git clone https://github.com/your-username/sentinel.git
+cd sentinel
+
+# Create virtual environment
+python -m venv .venv
+.venv\Scripts\activate      # Windows
+# source .venv/bin/activate  # macOS/Linux
+
+# Install dependencies
 pip install -r requirements.txt
 ```
 
-### 2. Configure API keys
+### Environment Variables
 
-1. Copy [`.env.example`](.env.example) to `.env`.
-2. Fill in required values:
-  - `TELEGRAM_TOKEN`
-  - `OPENAI_API_KEY` (SEA-LION)
-  - `GEMINI_API_KEY`
-3. Optional but recommended:
-  - `GROQ_API_KEY` for fallback LLM
-  - `DEEPGRAM_API_KEY` and `ELEVENLABS_API_KEY` for audio workflows
-  - `FIRECRAWL_API_KEY` for `/research`
-  - ClickHouse values for telemetry logging
+Copy `.env.example` to `.env` and fill in:
 
-Configuration is loaded by [config.py](config.py).
+```env
+# Required
+TELEGRAM_TOKEN=              # from @BotFather
+GEMINI_API_KEY=              # Google AI Studio
+OPENAI_API_KEY=              # SEA-LION API key
 
-### 3. Run the bot
+# Recommended
+GROQ_API_KEY=                # Fallback LLM
+DEEPGRAM_API_KEY=            # Audio transcription
+ELEVENLABS_API_KEY=          # TTS fallback
+FIRECRAWL_API_KEY=           # Web research + source retrieval
+CLICKHOUSE_HOST=             # Telemetry + RAG
+CLICKHOUSE_PASSWORD=
+```
 
-From the project root:
+Full variable list: see [TECHNICAL_DETAILS.md](TECHNICAL_DETAILS.md#environment-variables).
+
+### Run the Bot
 
 ```bash
 python telegram_bot.py
 ```
 
-### 4. Use in Telegram
+### Run the Web Dashboard
 
-Supported commands:
-- `/start` — Show welcome message
-- `/help` — Show usage help
-- `/detect <text>` — Analyze text directly
-- `/research <query>` — Run web research and summarization
+```bash
+uvicorn app:app --host 0.0.0.0 --port 8080
+```
 
-You can also send:
-- Plain text messages
-- Images
-- Voice/audio files
-- Videos
+Open [http://localhost:8080](http://localhost:8080) to access the dashboard.
 
-The bot returns an HTML-formatted verdict, confidence score, and explanation.
-
-### 5. Run tests
+### Run Tests
 
 ```bash
 python -m pytest tests/ -v
 ```
 
+---
+
+## Telegram Commands
+
+| Command | Description |
+|---------|-------------|
+| `/start` | Welcome message |
+| `/help` | Usage instructions |
+| `/detect <text>` | Analyse text for AI generation |
+| `/research <query>` | Web research and summarisation |
+| `/predict <text>` | Rumour forecast from announcement |
+| `/deploy` | Push counter-narratives to community channels |
+| *(send photo)* | Image OCR + AI detection + manipulation |
+| *(send voice)* | Transcribe + detect + spoken verdict |
+| *(send video)* | Frame + audio analysis |
+
+---
+
 ## Hackathon Compliance
 
-SENTINEL's backend is deployed on Google Cloud Run (asia-southeast1, service ID: `sentinel`). It uses the Gemini Live API (`gemini-2.5-flash-native-audio-latest`) via WebSocket for real-time spoken verdict delivery, and `gemini-2.5-flash` via the Google GenAI SDK for content analysis. The agent pipeline is orchestrated using Google ADK.
+SENTINEL is built for the **Gemini Live Agent Challenge** (Live Agents category).
 
-### Key evidence files
-
-| Requirement | Evidence |
-|---|---|
-| Gemini model | `config.py` — `GEMINI_MODEL`, `GEMINI_LIVE_MODEL` |
-| Google GenAI SDK | `media/live.py` — `from google import genai` |
-| Google ADK | `pipeline/sdk_runner.py`, `requirements.txt` |
-| GCP hosting | `Dockerfile`, `cloudbuild.yaml`, `verify_gcp.py` |
-| Gemini Live API | `media/live.py` — `client.aio.live.connect()` |
-| Multimodal I/O | `telegram_bot.py` — text, image, audio, video handlers |
+| Requirement | Implementation | Evidence |
+|---|---|---|
+| Gemini model | `gemini-2.5-flash` + `gemini-2.5-flash-native-audio-latest` | `config.py` |
+| Google GenAI SDK | `from google import genai` | `media/live.py`, `pipeline/insights.py` |
+| Google ADK | Agent SDK runner | `pipeline/sdk_runner.py` |
+| Google Cloud service | Cloud Run (asia-southeast1) | `Dockerfile`, `cloudbuild.yaml` |
+| Gemini Live API | Bidirectional audio WebSocket | `media/live.py` |
+| Multimodal I/O | Text, image, audio, video in → verdict + voice out | `telegram_bot.py` |
+| Real-time, interruptible | Live API with `end_of_turn` signalling | `media/live.py` |
 
 ### Deploy to Cloud Run
 
 ```bash
-# Prerequisites
 gcloud auth login
 gcloud config set project YOUR_PROJECT_ID
 gcloud config set run/region asia-southeast1
 
-# Deploy
 gcloud run deploy sentinel \
   --source . \
   --region asia-southeast1 \
@@ -96,81 +307,109 @@ gcloud run deploy sentinel \
   --set-env-vars "TELEGRAM_TOKEN=$TELEGRAM_TOKEN" \
   --set-env-vars "GEMINI_API_KEY=$GEMINI_API_KEY" \
   --set-env-vars "OPENAI_API_KEY=$OPENAI_API_KEY"
-
-# Verify
-gcloud run services describe sentinel \
-  --region asia-southeast1 \
-  --format="value(status.url)"
 ```
 
-### Verify hackathon compliance
+### Verify
 
 ```bash
-python verify_hackathon.py   # offline code checks (45+ checks)
-python verify_gcp.py         # prints K_SERVICE/K_REVISION when on Cloud Run
+python verify_hackathon.py   # 45+ offline code checks
+python verify_gcp.py         # Cloud Run environment check
 ```
 
-## Interesting Techniques
-
-- Asynchronous orchestration with Python `async`/`await` and `asyncio.gather` for parallel detection stages:
-  [Python asyncio docs](https://docs.python.org/3/library/asyncio.html)
-- Thread offloading for blocking SDK calls using `asyncio.to_thread()` to keep Telegram handlers responsive:
-  [asyncio.to_thread](https://docs.python.org/3/library/asyncio-task.html#asyncio.to_thread)
-- Reused async HTTP client patterns using [httpx](https://www.python-httpx.org/) for API-bound modules.
-- Strict language bridge flow (detect -> translate to English -> detect -> translate back) in [pipeline/translator.py](pipeline/translator.py).
-- Centralized LLM gateway with automatic fallback (Gemini -> Groq) in [pipeline/insights.py](pipeline/insights.py).
-- Non-blocking telemetry writes to ClickHouse in [pipeline/logger.py](pipeline/logger.py), keeping user response paths fast.
-- Structured fallback contracts for detection functions to avoid exception leaks into Telegram handlers.
-
-## Non-Obvious Technologies and Libraries
-
-- [SEA-LION GUARD](https://huggingface.co/aisingapore/SEA-LION-GUARD) for AI-generation detection.
-- [Google Generative AI Python SDK](https://github.com/google-gemini/deprecated-generative-ai-python) for primary LLM integration (current code path).
-- [OpenAI Python SDK](https://github.com/openai/openai-python) used with Groq OpenAI-compatible endpoint for fallback inference.
-- [Deepgram Python SDK](https://developers.deepgram.com/docs/python-sdk) for STT (`nova-2-general`) in [media/audio.py](media/audio.py).
-- [ElevenLabs Python SDK](https://github.com/elevenlabs/elevenlabs-python) for multilingual TTS in [media/audio.py](media/audio.py).
-- [Firecrawl](https://www.firecrawl.dev/) API integration in [research_agent/crawler.py](research_agent/crawler.py) for search + scrape workflows.
-- [clickhouse-connect](https://github.com/ClickHouse/clickhouse-connect) for asynchronous insert logging.
-- [opencv-python-headless](https://pypi.org/project/opencv-python-headless/) for frame extraction in [media/video.py](media/video.py).
-- [Pillow](https://python-pillow.org/) and [pytesseract](https://github.com/madmaze/pytesseract) for OCR/image processing in [media/image.py](media/image.py).
-- [langdetect](https://pypi.org/project/langdetect/) for text language detection guardrails in [pipeline/translator.py](pipeline/translator.py).
-
-No custom web fonts are used in this repository.
+---
 
 ## Project Structure
 
-```text
-.
-├── app.py
-├── CLAUDE.md
-├── config.py
-├── pyproject.toml
+```
+sentinel/
+├── telegram_bot.py           # Telegram handlers (primary entry point)
+├── app.py                    # FastAPI web server + dashboard
+├── config.py                 # Single env-var access point
+├── Dockerfile                # Cloud Run container
+├── cloudbuild.yaml           # CI/CD pipeline
 ├── requirements.txt
-├── run_sql.py
-├── telegram_bot.py
-├── verify_clickhouse.py
-├── verify_sdk_consistency.py
-├── ai_agent_adk/
-├── downloads/
-├── firecrawl_folder/
-├── frames/
-├── markdowns/
-│   ├── old/
-│   └── new/
-├── media/
-├── pipeline/
-├── research/
+│
+├── pipeline/                 # Core detection + prediction logic
+│   ├── detector.py           #   orchestrates GUARD + misinfo + manipulation
+│   ├── guard.py              #   SEA-LION GUARD safety classification
+│   ├── insights.py           #   LLM gateway (Gemini → Groq fallback)
+│   ├── translator.py         #   SEA-LION Gemma translation (EN↔ZH/MS/TA)
+│   ├── formatter.py          #   HTML formatting (parse_mode="HTML" only)
+│   ├── logger.py             #   ClickHouse non-blocking telemetry
+│   ├── predictor.py          #   NEW: rumour prediction engine
+│   ├── embeddings.py         #   NEW: Gemini embedding-001 (768-dim)
+│   ├── rag.py                #   NEW: hybrid ClickHouse vector search
+│   ├── deployer.py           #   NEW: Telegram counter-narrative push
+│   └── sdk_runner.py         #   ADK singleton runner
+│
+├── media/                    # Multimodal processing
+│   ├── image.py              #   OCR + manipulation detection
+│   ├── audio.py              #   Deepgram STT + ElevenLabs TTS
+│   ├── live.py               #   Gemini Live API (bidirectional audio)
+│   └── video.py              #   OpenCV + ffmpeg
+│
+├── research_agent/           # Web research subagent
+│   ├── agent.py              #   orchestration
+│   ├── crawler.py            #   Firecrawl API wrapper
+│   ├── summariser.py         #   LLM summarisation
+│   └── skill_cache.py        #   Jaccard similarity cache
+│
+├── static/
+│   └── index.html            # Web dashboard SPA
+│
+├── db/
+│   └── sql/                  # ClickHouse schema
+│       ├── 00_create_db.sql
+│       ├── 01_detection_events.sql
+│       ├── 02_materialized_views.sql
+│       └── 03_article_embeddings.sql  # NEW
+│
+├── tests/                    # pytest + pytest-asyncio
+│   ├── test_guard.py
+│   ├── test_insights.py
+│   ├── test_translator.py
+│   ├── test_formatter.py
+│   ├── test_audio.py
+│   ├── test_live.py
+│   ├── test_logger.py
+│   ├── test_research_agent.py
+│   └── test_predictor.py     # NEW
+│
+├── research/                 # Generated research outputs
 │   ├── raw/
 │   ├── skills/
 │   └── summaries/
-├── research_agent/
-├── tests/
-└── uploads/
+│
+├── verify_hackathon.py       # Hackathon compliance checker
+└── verify_gcp.py             # Cloud Run env check
 ```
 
-- [pipeline/](pipeline/): Core detection pipeline modules (guard, insights, translator, formatter, logger, orchestration).
-- [media/](media/): Multimodal processing modules (image OCR/manipulation, audio STT/TTS, video analysis).
-- [research_agent/](research_agent/): Web research orchestration, crawling, summarization, and cache.
-- [research/](research/): Generated research outputs (raw captures, summaries, reusable skill notes).
-- [markdowns/](markdowns/): Documentation split into historical and current refactor docs.
-- [tests/](tests/): Unit tests with external API mocking and async coverage.
+---
+
+## Key Technical Decisions
+
+1. **Reactive + proactive in one platform** — Instead of two tools, SENTINEL handles both content detection and rumour prediction through shared Gemini, ClickHouse, Firecrawl, and Telegram infrastructure.
+
+2. **SEA-LION for Singapore context** — AI Singapore's models are trained on Southeast Asian languages and cultural context, outperforming generic models for Singlish, Mandarin, Malay, and Tamil.
+
+3. **Gemini Live API for voice verdicts** — Single bidirectional WebSocket replaces a three-step STT→LLM→TTS pipeline, reducing latency and satisfying the hackathon's Live Agents requirement.
+
+4. **ClickHouse for everything** — One database for telemetry (SummingMergeTree), vector search (cosineDistance on Array(Float32)), and RAG — no separate vector DB needed.
+
+5. **Hybrid RAG** — Topic filtering + vector similarity improves precision for Singapore-specific misinformation vs pure embedding search.
+
+6. **Never-raise contract** — All detection and prediction functions return structured dicts on failure. No exceptions propagate to handlers. The bot stays up even when individual APIs go down.
+
+---
+
+## Documentation
+
+| Document | Description |
+|----------|-------------|
+| [TECHNICAL_DETAILS.md](TECHNICAL_DETAILS.md) | Architecture, data flows, schemas, technical decisions |
+| [PRODUCT_SPEC.md](PRODUCT_SPEC.md) | Feature inventory, user flows, data structures, demo scenarios |
+| [CLAUDE.md](CLAUDE.md) | AI assistant instructions and code rules |
+
+---
+
+*SENTINEL — Detect the threat. Predict the rumour. Protect the community.*

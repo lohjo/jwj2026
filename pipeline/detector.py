@@ -71,8 +71,35 @@ Rules:
             clean = re.sub(
                 r"^```(?:json)?\s*|\s*```$", "", raw.strip(), flags=re.MULTILINE
             ).strip()
-            return json.loads(clean)
-    except (json.JSONDecodeError, Exception) as e:
+            try:
+                return json.loads(clean)
+            except json.JSONDecodeError:
+                # Try to extract the outermost JSON object from response
+                brace_depth = 0
+                start_idx = -1
+                for i, ch in enumerate(clean):
+                    if ch == '{':
+                        if brace_depth == 0:
+                            start_idx = i
+                        brace_depth += 1
+                    elif ch == '}':
+                        brace_depth -= 1
+                        if brace_depth == 0 and start_idx >= 0:
+                            try:
+                                return json.loads(clean[start_idx:i + 1])
+                            except json.JSONDecodeError:
+                                start_idx = -1
+                # Parse what we can from the raw text
+                detected = bool(re.search(r'"misinformation_detected"\s*:\s*true', clean, re.I))
+                mtype_m = re.search(r'"misinformation_type"\s*:\s*"([^"]*)"', clean)
+                expl_m = re.search(r'"explanation"\s*:\s*"((?:[^"\\]|\\.)*)', clean)
+                return {
+                    "misinformation_detected": detected,
+                    "misinformation_type": mtype_m.group(1) if mtype_m else "unknown",
+                    "claims": [],
+                    "explanation": expl_m.group(1) if expl_m else clean[:300],
+                }
+    except Exception as e:
         logger.exception("[Misinformation] Detection failed: %s", e)
 
     return _fallback
