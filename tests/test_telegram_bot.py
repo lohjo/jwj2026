@@ -1155,6 +1155,31 @@ class TestStartBot:
             assert mock_app.add_handler.call_count >= 8
             mock_app.run_polling.assert_called_once()
 
+    def test_background_start_disables_signal_handlers(self):
+        from telegram_bot import start_bot_background
+
+        class _InlineThread:
+            def __init__(self, target=None, daemon=None):
+                self._target = target
+                self.daemon = daemon
+
+            def start(self):
+                self._target()
+
+        mock_app = MagicMock()
+        with patch("telegram_bot.TELEGRAM_TOKEN", "fake-token"), \
+             patch("telegram_bot._build_app", return_value=mock_app), \
+             patch(
+                 "telegram_bot.threading.Thread",
+                 side_effect=lambda target, daemon: _InlineThread(target=target, daemon=daemon),
+             ):
+            start_bot_background()
+
+        mock_app.run_polling.assert_called_once_with(
+            bootstrap_retries=5,
+            stop_signals=None,
+        )
+
 
 # ═══════════════════════════════════════════════════════════════════════
 # SECTION 12 — PARSE MODE COMPLIANCE
