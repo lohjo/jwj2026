@@ -3,7 +3,8 @@ FROM python:3.11-slim
 WORKDIR /app
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
 
 # System deps: ffmpeg (pydub audio conversion) + OpenCV headless runtime
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -12,13 +13,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
+# Create runtime user early so source copy can set ownership without a later chown pass.
+RUN useradd -m appuser
+
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --prefer-binary -r requirements.txt
 
-COPY . .
-
-# Non-root user for security
-RUN useradd -m appuser && chown -R appuser /app
+COPY --chown=appuser:appuser . .
 USER appuser
 
 # Cloud Run injects PORT; telegram_bot.py uses polling, not HTTP

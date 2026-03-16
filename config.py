@@ -20,14 +20,38 @@ for _p in _env_candidates:
 
 
 def _require(key: str) -> str:
-    val = os.getenv(key)
+    val = _sanitize_env_value(os.getenv(key))
     if not val:
         sys.exit(f"[SENTINEL] Missing required env var: {key}")
     return val
 
 
 def _optional(key: str, default: str = "") -> str:
-    return os.getenv(key, default)
+    return _sanitize_env_value(os.getenv(key), default)
+
+
+def _sanitize_env_value(value: str | None, default: str = "") -> str:
+    """Normalize env var values and remove accidental inline comment fragments.
+
+    Examples sanitized:
+    - "token123 # placeholder"
+    - "token123 ; placeholder"
+    """
+    if value is None:
+        return default
+
+    cleaned = value.strip()
+    # Strip leading UTF-8 BOM (common when values are read from files).
+    cleaned = cleaned.lstrip("\ufeff")
+    if not cleaned:
+        return default
+
+    # Remove accidental trailing comments often copied from docs.
+    for marker in (" #", " ;"):
+        if marker in cleaned:
+            cleaned = cleaned.split(marker, 1)[0].strip()
+
+    return cleaned or default
 
 
 # ── Telegram ────────────────────────────────────────────────────────────

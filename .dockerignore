@@ -1,0 +1,28 @@
+# VCS and local environments
+.git
+.gitignore
+.venv/
+__pycache__/
+.pytest_cache/
+*.pyc
+*.pyo
+*.pyd
+
+# Local runtime artifacts
+.env
+.env.*
+!.env.example
+downloads/
+uploads/
+tmp/
+
+# Development-only assets not needed in runtime image
+tests/
+markdowns/
+research/raw/
+
+# Editor and metadata
+.vscode/
+.claude/
+*.md
+!README.md

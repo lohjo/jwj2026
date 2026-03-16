@@ -82,6 +82,10 @@ SENTINEL's backend is deployed on Google Cloud Run (asia-southeast1, service ID:
 
 ### Deploy to Cloud Run
 
+Recommended (production): configure secrets via Secret Manager and reference them from Cloud Run.
+
+- Windows/PowerShell helper: [setup-gcp-secrets.ps1](setup-gcp-secrets.ps1)
+
 ```bash
 # Prerequisites
 gcloud auth login
