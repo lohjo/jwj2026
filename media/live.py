@@ -7,8 +7,10 @@ Falls back gracefully to b"" on any failure — never raises into the caller.
 
 import io
 import logging
+import os
 import shutil
 import subprocess
+import tempfile
 
 from google import genai
 from google.genai import types
@@ -19,6 +21,9 @@ logger = logging.getLogger(__name__)
 
 # Cache ffmpeg availability check
 _ffmpeg_path: str | None = shutil.which("ffmpeg")
+
+# Container formats that require a seekable input — pipe:0 won't work for these.
+_SEEKABLE_FORMATS: frozenset[str] = frozenset({"mp4", "webm"})
 
 SENTINEL_LIVE_PERSONA = """
 You are SENTINEL, an AI content detection assistant for Singapore users.
@@ -200,16 +205,36 @@ def _to_pcm(audio_bytes: bytes, mime_type: str) -> bytes:
     # Primary: subprocess ffmpeg (no audioop needed)
     if _ffmpeg_path:
         try:
-            result = subprocess.run(
-                [
-                    _ffmpeg_path, "-y",
-                    "-f", fmt, "-i", "pipe:0",
-                    "-f", "s16le", "-ar", "16000", "-ac", "1", "pipe:1",
-                ],
-                input=audio_bytes,
-                capture_output=True,
-                timeout=15,
-            )
+            if fmt in _SEEKABLE_FORMATS:
+                # Write to a temp file so ffmpeg can seek through the container.
+                tmp_fd, tmp_path = tempfile.mkstemp(suffix=f".{fmt}")
+                try:
+                    try:
+                        os.write(tmp_fd, audio_bytes)
+                    finally:
+                        os.close(tmp_fd)
+                    result = subprocess.run(
+                        [
+                            _ffmpeg_path, "-y",
+                            "-i", tmp_path,
+                            "-f", "s16le", "-ar", "16000", "-ac", "1", "pipe:1",
+                        ],
+                        capture_output=True,
+                        timeout=15,
+                    )
+                finally:
+                    os.unlink(tmp_path)
+            else:
+                result = subprocess.run(
+                    [
+                        _ffmpeg_path, "-y",
+                        "-f", fmt, "-i", "pipe:0",
+                        "-f", "s16le", "-ar", "16000", "-ac", "1", "pipe:1",
+                    ],
+                    input=audio_bytes,
+                    capture_output=True,
+                    timeout=15,
+                )
             if result.returncode == 0 and result.stdout:
                 return result.stdout
             logger.warning(
