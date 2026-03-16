@@ -5,30 +5,30 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SENTINEL — AI Content Detection</title>
     <style>
-        /* ── SENTINEL design tokens (Impeccable /colorize) ──────────── */
+        /* ── SENTINEL design tokens ─────────────────────────────────── */
         :root {
-            --bg-primary: #111827;
-            --bg-secondary: #1a2233;
-            --bg-card: rgba(249, 115, 22, 0.03);
-            --bg-card-hover: rgba(249, 115, 22, 0.06);
-            --bg-input: rgba(0, 0, 0, 0.25);
-            --text-primary: #e8ecf4;
-            --text-secondary: rgba(232, 236, 244, 0.65);
-            --text-tertiary: rgba(232, 236, 244, 0.45);
-            --text-muted: rgba(232, 236, 244, 0.3);
-            --accent: #F97316;
-            --accent-hover: #ea580c;
-            --success: #22c55e;
-            --warning: #f59e0b;
-            --danger: #ef4444;
-            --border: rgba(249, 115, 22, 0.08);
-            --border-active: rgba(249, 115, 22, 0.18);
-            --radius: 12px;
-            --risk-critical: #ef4444;
-            --risk-high: #f59e0b;
-            --risk-medium: #F97316;
-            --risk-low: #22c55e;
-            /* Spacing scale (4pt base grid — Impeccable /distill) */
+            --bg-primary: #F7F7F5;
+            --bg-secondary: #EEEEED;
+            --bg-card: #FFFFFF;
+            --bg-card-hover: #FAFAF9;
+            --bg-input: #FFFFFF;
+            --text-primary: #1B1B1F;
+            --text-secondary: #4A4A5A;
+            --text-tertiary: #70707C;
+            --text-muted: #9E9EA8;
+            --accent: #1D4ED8;
+            --accent-hover: #1E40AF;
+            --success: #16A34A;
+            --warning: #D97706;
+            --danger: #DC2626;
+            --border: rgba(0, 0, 0, 0.08);
+            --border-active: rgba(0, 0, 0, 0.16);
+            --radius: 10px;
+            --risk-critical: #DC2626;
+            --risk-high: #D97706;
+            --risk-medium: #EA580C;
+            --risk-low: #16A34A;
+            /* Spacing scale (4pt base grid) */
             --space-xs: 4px;
             --space-sm: 8px;
             --space-md: 16px;
@@ -46,18 +46,7 @@
             min-height: 100vh;
         }
 
-        /* Dot grid background */
-        body::before {
-            content: "";
-            position: fixed;
-            inset: 0;
-            background-image: radial-gradient(rgba(249, 115, 22, 0.04) 1px, transparent 1px);
-            background-size: 32px 32px;
-            pointer-events: none;
-            z-index: 0;
-        }
-
-        ::selection { background: rgba(249, 115, 22, 0.3); }
+        ::selection { background: rgba(29, 78, 216, 0.15); }
 
         @keyframes fadeIn {
             from { opacity: 0; }
@@ -73,8 +62,8 @@
         }
         @keyframes spin { to { transform: rotate(360deg); } }
         @keyframes micPulse {
-            0%, 100% { box-shadow: 0 0 0 0 rgba(249, 115, 22, 0.4); }
-            50% { box-shadow: 0 0 0 20px rgba(249, 115, 22, 0); }
+            0%, 100% { box-shadow: 0 0 0 0 rgba(29, 78, 216, 0.4); }
+            50% { box-shadow: 0 0 0 20px rgba(29, 78, 216, 0); }
         }
         /* Impeccable /animate — staggered entrance for cards */
         @keyframes cardEntrance {
@@ -102,35 +91,11 @@
             margin-bottom: 2.5rem;
         }
 
-        .header .status {
-            display: flex;
-            align-items: center;
-            gap: 0.75rem;
-            margin-bottom: 0.375rem;
-        }
-
-        .header .status-dot {
-            width: 10px; height: 10px;
-            border-radius: 50%;
-            background: var(--success);
-            box-shadow: 0 0 10px rgba(34, 197, 94, 0.5);
-        }
-
-        .header .status-label {
-            font-family: 'JetBrains Mono', 'Fira Code', monospace;
-            font-size: 11px;
-            letter-spacing: 0.12em;
-            text-transform: uppercase;
-            color: var(--text-tertiary);
-        }
-
         .header h1 {
             font-size: 36px;
             font-weight: 900;
             letter-spacing: -0.02em;
-            background: linear-gradient(135deg, #F97316 0%, #ea580c 50%, #e8ecf4 100%);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
+            color: var(--text-primary);
             margin-bottom: 0.25rem;
         }
 
@@ -158,16 +123,15 @@
             font-size: 13px;
             font-weight: 600;
             transition: all 0.2s;
-            font-family: 'JetBrains Mono', 'Fira Code', monospace;
-            letter-spacing: 0.04em;
+            letter-spacing: 0.01em;
         }
 
         .tab:hover { border-color: var(--border-active); color: var(--text-secondary); }
 
         .tab.active {
-            background: rgba(249, 115, 22, 0.1);
+            background: rgba(29, 78, 216, 0.06);
             color: var(--accent);
-            border-color: rgba(249, 115, 22, 0.3);
+            border-color: rgba(29, 78, 216, 0.2);
         }
 
         .panel { display: none; }
@@ -182,10 +146,10 @@
             margin-bottom: 1.25rem;
             transition: border-color 0.25s cubic-bezier(0.16, 1, 0.3, 1);
             animation: cardEntrance 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
         }
 
         .card:hover {
-            background: var(--bg-card-hover);
             border-color: var(--border-active);
         }
 
@@ -193,10 +157,9 @@
             font-size: 13px;
             font-weight: 700;
             text-transform: uppercase;
-            letter-spacing: 0.08em;
+            letter-spacing: 0.06em;
             color: var(--text-tertiary);
             margin-bottom: 1rem;
-            font-family: 'JetBrains Mono', 'Fira Code', monospace;
         }
 
         .card-desc {
@@ -210,12 +173,12 @@
         textarea, input[type="text"] {
             width: 100%;
             background: var(--bg-input);
-            border: 1px solid rgba(255, 255, 255, 0.08);
+            border: 1px solid var(--border);
             border-radius: 8px;
             padding: 1rem;
-            color: #c8cad2;
-            font-family: 'JetBrains Mono', 'Fira Code', monospace;
-            font-size: 13px;
+            color: var(--text-primary);
+            font-family: 'Source Sans 3', 'Segoe UI', system-ui, sans-serif;
+            font-size: 15px;
             line-height: 1.7;
             resize: vertical;
             outline: none;
@@ -223,15 +186,14 @@
         }
 
         textarea:focus, input[type="text"]:focus {
-            border-color: rgba(249, 115, 22, 0.3);
-            box-shadow: 0 0 0 2px rgba(249, 115, 22, 0.08);
+            border-color: rgba(29, 78, 216, 0.4);
+            box-shadow: 0 0 0 2px rgba(29, 78, 216, 0.08);
         }
 
         textarea { min-height: 160px; }
 
         .char-count {
-            font-family: 'JetBrains Mono', 'Fira Code', monospace;
-            font-size: 11px;
+            font-size: 12px;
             color: var(--text-muted);
             text-align: right;
             margin-top: 0.5rem;
@@ -253,9 +215,9 @@
         }
 
         .btn-primary {
-            background: linear-gradient(135deg, #F97316, #ea580c);
+            background: var(--accent);
             color: white;
-            box-shadow: 0 4px 24px rgba(249, 115, 22, 0.25);
+            box-shadow: 0 1px 3px rgba(29, 78, 216, 0.2);
         }
 
         .btn-primary:hover { filter: brightness(1.1); transform: translateY(-1px); }
@@ -276,19 +238,19 @@
 
         /* ── File Upload ───────────────────────────────────────────── */
         .file-upload {
-            border: 1px dashed rgba(255, 255, 255, 0.1);
+            border: 1px dashed var(--border-active);
             border-radius: var(--radius);
             padding: 2.5rem 2rem;
             text-align: center;
             cursor: pointer;
             transition: all 0.2s;
             position: relative;
-            background: var(--bg-input);
+            background: var(--bg-card);
         }
 
         .file-upload:hover {
-            border-color: rgba(249, 115, 22, 0.4);
-            background: rgba(249, 115, 22, 0.03);
+            border-color: rgba(29, 78, 216, 0.3);
+            background: rgba(29, 78, 216, 0.02);
         }
 
         .file-upload input[type="file"] {
@@ -303,13 +265,14 @@
         .file-upload .sublabel { color: var(--text-muted); font-size: 12px; margin-top: 0.25rem; }
         .file-upload .filename { color: var(--accent); font-size: 12px; margin-top: 0.5rem; font-family: monospace; }
 
-        /* ── Processing Animation (ContextGuard pattern) ───────────── */
+        /* ── Processing Animation ───────────── */
         .processing-box {
             background: var(--bg-card);
             border: 1px solid var(--border);
             border-radius: var(--radius);
             padding: 2rem;
             animation: fadeIn 0.4s ease;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
         }
 
         .processing-header {
@@ -327,9 +290,9 @@
         }
 
         .processing-header span {
-            font-family: 'JetBrains Mono', 'Fira Code', monospace;
-            font-size: 12px;
-            letter-spacing: 0.06em;
+            font-size: 13px;
+            font-weight: 600;
+            letter-spacing: 0.02em;
             color: var(--accent);
         }
 
@@ -374,7 +337,7 @@
             animation: pulse 1s infinite;
         }
 
-        /* ── Results (ContextGuard pattern) ─────────────────────────── */
+        /* ── Results ─────────────────────────────────────────── */
         .results-container { animation: fadeIn 0.5s ease; }
 
         .verdict-card {
@@ -423,7 +386,6 @@
             gap: 0.375rem;
             padding: 3px 10px;
             border-radius: 999px;
-            font-family: 'JetBrains Mono', 'Fira Code', monospace;
             font-size: 10px;
             font-weight: 700;
             letter-spacing: 0.06em;
@@ -465,15 +427,13 @@
             margin-bottom: 0.75rem;
             overflow: hidden;
             transition: border-color 0.25s cubic-bezier(0.16, 1, 0.3, 1),
-                        background 0.25s cubic-bezier(0.16, 1, 0.3, 1),
                         transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
             animation: cardEntrance 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
         }
 
         .detail-card:hover {
-            background: var(--bg-card-hover);
             border-color: var(--border-active);
-            transform: translateY(-1px);
         }
 
         .detail-header {
@@ -547,10 +507,9 @@
         }
 
         .detail-body .info-box .box-label {
-            font-family: 'JetBrains Mono', 'Fira Code', monospace;
             font-size: 10px;
             font-weight: 700;
-            letter-spacing: 0.08em;
+            letter-spacing: 0.06em;
             text-transform: uppercase;
             margin-bottom: 0.375rem;
         }
@@ -595,14 +554,25 @@
             border: 1px solid var(--border);
             background: transparent;
             color: var(--text-muted);
-            font-family: 'JetBrains Mono', 'Fira Code', monospace;
-            font-size: 10px;
+            font-size: 11px;
             cursor: pointer;
             transition: all 0.2s;
         }
 
         .copy-btn:hover { color: var(--text-secondary); border-color: var(--border-active); }
         .copy-btn.copied { color: var(--success); border-color: rgba(34, 197, 94, 0.3); }
+
+        .reset-link {
+            color: var(--text-muted);
+            font-size: 13px;
+            cursor: pointer;
+            background: none;
+            border: none;
+            padding: 4px 0;
+            transition: color 0.2s;
+            text-decoration: none;
+        }
+        .reset-link:hover { color: var(--text-primary); }
 
         /* JSON expandable */
         .json-toggle {
@@ -617,7 +587,7 @@
         .json-toggle:hover { color: var(--text-secondary); }
 
         .json-box {
-            background: rgba(0, 0, 0, 0.3);
+            background: var(--bg-secondary);
             border: 1px solid var(--border);
             border-radius: 8px;
             padding: 1rem;
@@ -633,7 +603,7 @@
 
         /* Legacy result box (for image/video panels) */
         .result-box {
-            background: rgba(0, 0, 0, 0.3);
+            background: var(--bg-secondary);
             border: 1px solid var(--border);
             border-radius: 8px;
             padding: 1rem;
@@ -687,11 +657,11 @@
             transition: all 0.3s;
         }
 
-        .mic-button:hover { border-color: rgba(249, 115, 22, 0.4); transform: scale(1.05); }
+        .mic-button:hover { border-color: rgba(29, 78, 216, 0.4); transform: scale(1.05); }
 
         .mic-button.recording {
             border-color: var(--accent);
-            background: rgba(249, 115, 22, 0.1);
+            background: rgba(29, 78, 216, 0.06);
             animation: micPulse 1.5s infinite;
         }
 
@@ -781,22 +751,18 @@
 </head>
 <body>
     <div class="container">
-        <!-- ── Header (ContextGuard pattern) ──────────────────────── -->
+        <!-- ── Header ──────────────────────── -->
         <div class="header">
-            <div class="status">
-                <div class="status-dot"></div>
-                <span class="status-label">System Active</span>
-            </div>
             <h1>SENTINEL</h1>
-            <p>AI Content Detection Engine &mdash; Singapore</p>
+            <p>AI Content Detection &mdash; Singapore</p>
         </div>
 
         <!-- ── Tabs ────────────────────────────────────────────────── -->
         <div class="tabs">
-            <div class="tab active" data-panel="text">&#x1F4DD; Text</div>
-            <div class="tab" data-panel="voice">&#x1F399; Voice (Live API)</div>
-            <div class="tab" data-panel="image">&#x1F5BC; Image</div>
-            <div class="tab" data-panel="video">&#x1F3AC; Video</div>
+            <div class="tab active" data-panel="text">Text</div>
+            <div class="tab" data-panel="voice">Voice</div>
+            <div class="tab" data-panel="image">Image</div>
+            <div class="tab" data-panel="video">Video</div>
         </div>
 
         <!-- ── Text Panel ──────────────────────────────────────────── -->
@@ -804,62 +770,61 @@
             <!-- Input phase -->
             <div id="text-input-phase">
                 <div class="card">
-                    <h2>&#x1F50D; Content Analysis</h2>
+                    <h2>Content Analysis</h2>
                     <p class="card-desc">
-                        Paste text to analyse for AI-generation, misinformation, and harmful content.
-                        The pipeline runs GUARD safety &#x2192; misinformation check &#x2192; AI insights in real time.
+                        Paste text to check for AI-generated content, false claims, and harmful material.
                     </p>
                     <textarea id="text-input" placeholder="Paste text here to analyse...">A new study has found that drinking coffee can cure cancer. The research, conducted by unnamed scientists at an undisclosed university, claims that just two cups of coffee per day can eliminate all forms of cancer within weeks. Health authorities have not commented on these findings.</textarea>
                     <div class="char-count"><span id="char-count">0</span> chars</div>
                     <div class="actions">
                         <button class="btn btn-primary" id="btn-analyse-text" onclick="analyseTextStream()">
-                            &#x25B6; Run Full Analysis
+                            Analyse
                         </button>
                         <button class="btn btn-secondary" id="btn-detect-misinfo" onclick="detectMisinfo()">
-                            &#x1F4F0; Misinformation Only
+                            Fact-Check Only
                         </button>
                     </div>
                 </div>
                 <div class="demo-hint">
-                    <p><span class="highlight">Demo mode:</span> Pre-loaded with a sample misinformation text.
-                    Click &#x25B6; Run Full Analysis to see the pipeline in action with real-time progress.</p>
+                    <p><span class="highlight">Demo:</span> Pre-loaded with a sample false-claim text.
+                    Click Analyse to see real-time progress.</p>
                 </div>
             </div>
 
-            <!-- Processing phase (ContextGuard-style animation) -->
+            <!-- Processing phase -->
             <div id="text-processing-phase" style="display:none;">
                 <div class="processing-box">
                     <div class="processing-header">
                         <div class="dot"></div>
-                        <span>ANALYSING</span>
+                        <span>Analysing</span>
                     </div>
                     <div id="pipeline-steps">
                         <div class="pipeline-step pending" data-step="guard">
                             <div class="icon">&#x25CB;</div>
-                            <div class="label">Running GUARD safety check</div>
+                            <div class="label">Checking for harmful content</div>
                             <div class="status-text"></div>
                         </div>
                         <div class="pipeline-step pending" data-step="misinfo">
                             <div class="icon">&#x25CB;</div>
-                            <div class="label">Detecting misinformation</div>
+                            <div class="label">Verifying claims</div>
                             <div class="status-text"></div>
                         </div>
                         <div class="pipeline-step pending" data-step="insights">
                             <div class="icon">&#x25CB;</div>
-                            <div class="label">Generating AI insights</div>
+                            <div class="label">Building your report</div>
                             <div class="status-text"></div>
                         </div>
                     </div>
                     <div id="finalizing-indicator" style="display:none; border-top:1px solid var(--border); margin-top:1rem; padding-top:1rem;">
                         <div style="display:flex; align-items:center; gap:0.625rem;">
                             <div style="width:8px; height:8px; border-radius:50%; background:var(--success); animation:pulse 1s infinite;"></div>
-                            <span style="font-family:monospace; font-size:12px; letter-spacing:0.06em; color:var(--success);">Finalizing results...</span>
+                            <span style="font-size:12px; color:var(--success);">Finalising results…</span>
                         </div>
                     </div>
                 </div>
             </div>
 
-            <!-- Results phase (ContextGuard-style cards) -->
+            <!-- Results phase -->
             <div id="text-results-phase" style="display:none;">
                 <div class="results-container">
                     <!-- Verdict banner -->
@@ -875,10 +840,10 @@
                     </div>
 
                     <!-- Copy + New Analysis buttons -->
-                    <div style="display:flex; gap:0.75rem; margin-top:1rem; flex-wrap:wrap;">
+                    <div style="display:flex; gap:0.75rem; margin-top:1rem; flex-wrap:wrap; align-items:center;">
                         <button class="copy-btn" onclick="copyResults()">&#x1F4CB; Copy Results</button>
-                        <button class="btn btn-secondary" id="btn-research-text" style="display:none;" onclick="runResearch('text')">&#x1F50E; Research This</button>
-                        <button class="btn btn-secondary" onclick="resetTextPanel()">&#x2190; New Analysis</button>
+                        <button class="btn btn-secondary" id="btn-research-text" style="display:none;" onclick="runResearch('text')">Research This</button>
+                        <button class="reset-link" onclick="resetTextPanel()">&#x2190; New analysis</button>
                     </div>
                     <div id="text-research-result" style="display:none; margin-top:1rem;"></div>
                 </div>
@@ -891,11 +856,10 @@
         <!-- ── Voice Panel (Gemini Live API) ────────────────────────── -->
         <div id="panel-voice" class="panel">
             <div class="card">
-                <h2>&#x1F399; Voice &mdash; Gemini Live API</h2>
+                <h2>Voice Analysis</h2>
                 <p class="card-desc">
-                    Speak to SENTINEL. Audio is transcribed (Deepgram), analysed through the full
-                    detection pipeline (GUARD + misinformation + insights), then Gemini Live API
-                    generates a spoken verdict.
+                    Speak to SENTINEL. Your audio is transcribed, checked for harmful content
+                    and false claims, then you receive a spoken verdict.
                 </p>
                 <div class="voice-section">
                     <div class="visualizer-container" id="visualizer"></div>
@@ -913,13 +877,13 @@
                 <!-- Transcript + detection results -->
                 <div id="voice-detection-results" style="display:none;">
                     <div id="voice-transcript-box" class="info-box info" style="margin-top:1rem; background:rgba(59,130,246,0.05); border:1px solid rgba(59,130,246,0.12); border-radius:8px; padding:0.75rem 0.875rem;">
-                        <div class="box-label" style="font-family:monospace; font-size:10px; font-weight:700; letter-spacing:0.08em; text-transform:uppercase; color:var(--accent); margin-bottom:0.375rem;">Transcript</div>
+                        <div class="box-label" style="font-size:10px; font-weight:700; letter-spacing:0.06em; text-transform:uppercase; color:var(--accent); margin-bottom:0.375rem;">Transcript</div>
                         <p id="voice-transcript-text" style="font-size:12px; line-height:1.6; color:var(--text-secondary);"></p>
                     </div>
                     <div id="voice-verdict-banner" style="margin-top:0.75rem;"></div>
                     <div id="voice-detection-details" style="margin-top:0.75rem;"></div>
                     <div style="display:flex; gap:0.75rem; margin-top:0.75rem; flex-wrap:wrap;">
-                        <button class="btn btn-secondary" id="btn-research-voice" style="display:none;" onclick="runResearch('voice')">&#x1F50E; Research This</button>
+                        <button class="btn btn-secondary" id="btn-research-voice" style="display:none;" onclick="runResearch('voice')">Research This</button>
                     </div>
                     <div id="voice-research-result" style="display:none; margin-top:0.75rem;"></div>
                 </div>
@@ -927,10 +891,10 @@
             </div>
 
             <div class="card">
-                <h2>&#x1F4C1; Upload Audio File</h2>
+                <h2>Upload Audio File</h2>
                 <p class="card-desc">
-                    Upload a pre-recorded audio file for full pipeline analysis: transcription,
-                    GUARD, misinformation detection, insights, and spoken verdict.
+                    Upload a pre-recorded audio file for full analysis: transcription,
+                    safety check, fact-checking, and spoken verdict.
                 </p>
                 <div class="file-upload" id="audio-dropzone">
                     <div class="icon">&#x1F3B5;</div>
@@ -941,7 +905,7 @@
                 </div>
                 <div class="actions">
                     <button class="btn btn-primary" id="btn-upload-audio" onclick="uploadAudio()" disabled>
-                        &#x1F50A; Analyse Audio
+                        Analyse Audio
                     </button>
                 </div>
                 <div id="upload-audio-result" class="result-box" style="display:none;"></div>
@@ -954,13 +918,13 @@
                 <!-- Upload transcript + detection results -->
                 <div id="upload-detection-results" style="display:none;">
                     <div id="upload-transcript-box" class="info-box info" style="margin-top:1rem; background:rgba(59,130,246,0.05); border:1px solid rgba(59,130,246,0.12); border-radius:8px; padding:0.75rem 0.875rem;">
-                        <div class="box-label" style="font-family:monospace; font-size:10px; font-weight:700; letter-spacing:0.08em; text-transform:uppercase; color:var(--accent); margin-bottom:0.375rem;">Transcript</div>
+                        <div class="box-label" style="font-size:10px; font-weight:700; letter-spacing:0.06em; text-transform:uppercase; color:var(--accent); margin-bottom:0.375rem;">Transcript</div>
                         <p id="upload-transcript-text" style="font-size:12px; line-height:1.6; color:var(--text-secondary);"></p>
                     </div>
                     <div id="upload-verdict-banner" style="margin-top:0.75rem;"></div>
                     <div id="upload-detection-details" style="margin-top:0.75rem;"></div>
                     <div style="display:flex; gap:0.75rem; margin-top:0.75rem; flex-wrap:wrap;">
-                        <button class="btn btn-secondary" id="btn-research-upload" style="display:none;" onclick="runResearch('upload')">&#x1F50E; Research This</button>
+                        <button class="btn btn-secondary" id="btn-research-upload" style="display:none;" onclick="runResearch('upload')">Research This</button>
                     </div>
                     <div id="upload-research-result" style="display:none; margin-top:0.75rem;"></div>
                 </div>
@@ -970,10 +934,9 @@
         <!-- ── Image Panel ─────────────────────────────────────────── -->
         <div id="panel-image" class="panel">
             <div class="card">
-                <h2>&#x1F5BC; Image Analysis</h2>
+                <h2>Image Analysis</h2>
                 <p class="card-desc">
-                    Upload an image to run the full detection pipeline: Gemini visual analysis,
-                    GUARD safety, misinformation check, manipulation detection, and AI insights.
+                    Upload an image to check for AI-generation, manipulation, and false claims.
                 </p>
 
                 <!-- Input phase -->
@@ -990,10 +953,10 @@
                     </div>
                     <div class="actions">
                         <button class="btn btn-primary" id="btn-analyse-image" onclick="analyseImageStream()" disabled>
-                            &#x25B6; Run Full Analysis
+                            Analyse
                         </button>
                         <button class="btn btn-secondary" id="btn-detect-manip" onclick="detectManipulation()" disabled>
-                            &#x1F3AD; Manipulation Only
+                            Manipulation Only
                         </button>
                     </div>
                 </div>
@@ -1006,32 +969,32 @@
                     <div class="processing-box">
                         <div class="processing-header">
                             <div class="dot"></div>
-                            <span>ANALYSING IMAGE</span>
+                            <span>Analysing image</span>
                         </div>
                         <div id="image-pipeline-steps">
                             <div class="pipeline-step pending" data-step="vision">
                                 <div class="icon">&#x25CB;</div>
-                                <div class="label">Gemini visual analysis</div>
+                                <div class="label">Reading image content</div>
                                 <div class="status-text"></div>
                             </div>
                             <div class="pipeline-step pending" data-step="guard">
                                 <div class="icon">&#x25CB;</div>
-                                <div class="label">Running GUARD safety check</div>
+                                <div class="label">Checking for harmful content</div>
                                 <div class="status-text"></div>
                             </div>
                             <div class="pipeline-step pending" data-step="misinfo">
                                 <div class="icon">&#x25CB;</div>
-                                <div class="label">Detecting misinformation</div>
+                                <div class="label">Verifying claims</div>
                                 <div class="status-text"></div>
                             </div>
                             <div class="pipeline-step pending" data-step="manipulation">
                                 <div class="icon">&#x25CB;</div>
-                                <div class="label">Checking image manipulation</div>
+                                <div class="label">Checking for edits</div>
                                 <div class="status-text"></div>
                             </div>
                             <div class="pipeline-step pending" data-step="insights">
                                 <div class="icon">&#x25CB;</div>
-                                <div class="label">Generating AI insights</div>
+                                <div class="label">Building your report</div>
                                 <div class="status-text"></div>
                             </div>
                         </div>
@@ -1047,10 +1010,10 @@
                             <div class="json-toggle" onclick="toggleImageRawJson()">&#x25B8; Show raw JSON response</div>
                             <div id="image-raw-json-box" class="json-box" style="display:none;"></div>
                         </div>
-                        <div style="display:flex; gap:0.75rem; margin-top:1rem; flex-wrap:wrap;">
+                        <div style="display:flex; gap:0.75rem; margin-top:1rem; flex-wrap:wrap; align-items:center;">
                             <button class="copy-btn" onclick="copyImageResults()">&#x1F4CB; Copy Results</button>
-                            <button class="btn btn-secondary" id="btn-research-image" style="display:none;" onclick="runResearch('image')">&#x1F50E; Research This</button>
-                            <button class="btn btn-secondary" onclick="resetImagePanel()">&#x2190; New Analysis</button>
+                            <button class="btn btn-secondary" id="btn-research-image" style="display:none;" onclick="runResearch('image')">Research This</button>
+                            <button class="reset-link" onclick="resetImagePanel()">&#x2190; New analysis</button>
                         </div>
                         <div id="image-research-result" style="display:none; margin-top:1rem;"></div>
                     </div>
@@ -1064,9 +1027,9 @@
         <!-- ── Video Panel ─────────────────────────────────────────── -->
         <div id="panel-video" class="panel">
             <div class="card">
-                <h2>&#x1F3AC; Video Analysis</h2>
+                <h2>Video Analysis</h2>
                 <p class="card-desc">
-                    Upload a video to analyse frames for AI-generation signals and deepfake detection.
+                    Upload a video to check for AI-generated content and deepfake signals.
                 </p>
                 <div class="file-upload" id="video-dropzone">
                     <div class="icon">&#x1F3AC;</div>
@@ -1077,28 +1040,28 @@
                 </div>
                 <div class="actions">
                     <button class="btn btn-primary" id="btn-detect-video" onclick="detectVideo()" disabled>
-                        &#x1F50D; Analyse Video
+                        Analyse Video
                     </button>
                 </div>
                 <div id="video-result" class="result-box" style="display:none;"></div>
             </div>
         </div>
 
-        <!-- ── Features (ContextGuard-style) ───────────────────────── -->
+        <!-- ── Capabilities ───────────────────────── -->
         <div class="card">
-            <h2>&#x2699; Capabilities</h2>
+            <h2>Capabilities</h2>
             <div class="features-grid">
                 <div class="feature-item">
                     <div class="icon">&#x1F6E1;</div>
-                    <div class="name">GUARD Safety<br><small>SEA-LION GUARD</small></div>
+                    <div class="name">Safety Check<br><small>Harmful content detection</small></div>
                 </div>
                 <div class="feature-item">
                     <div class="icon">&#x1F4F0;</div>
-                    <div class="name">Misinformation<br><small>Gemini + Groq</small></div>
+                    <div class="name">Fact-Checking<br><small>Claims verification</small></div>
                 </div>
                 <div class="feature-item">
                     <div class="icon">&#x1F399;</div>
-                    <div class="name">Voice Analysis<br><small>Gemini Live API</small></div>
+                    <div class="name">Voice Analysis<br><small>Spoken verdict</small></div>
                 </div>
                 <div class="feature-item">
                     <div class="icon">&#x1F30F;</div>
@@ -1148,7 +1111,7 @@
             el.innerHTML = '<span class="loading"><span class="spinner"></span> Analysing...</span>';
         }
 
-        // ── SSE Text Analysis (ContextGuard pattern) ───────────────
+        // ── SSE Text Analysis ───────────────
         async function analyseTextStream() {
             const text = textInput.value.trim();
             if (!text) return;
@@ -2179,7 +2142,7 @@
                 <div class="processing-box">
                     <div class="processing-header">
                         <div class="dot"></div>
-                        <span>RESEARCHING</span>
+                        <span>Researching</span>
                     </div>
                     <p style="color:var(--text-secondary); font-size:12px; margin-top:0.75rem;">
                         Searching web sources and generating research report...
@@ -2198,7 +2161,7 @@
                 if (data.error) {
                     container.innerHTML = `
                         <div class="info-box warn" style="background:rgba(245,158,11,0.06); border:1px solid rgba(245,158,11,0.12); border-radius:8px; padding:0.75rem 0.875rem;">
-                            <div class="box-label" style="font-family:monospace; font-size:10px; font-weight:700; color:var(--warning);">RESEARCH UNAVAILABLE</div>
+                            <div class="box-label" style="font-size:10px; font-weight:700; color:var(--warning);">RESEARCH UNAVAILABLE</div>
                             <p style="font-size:12px; color:var(--text-secondary);">${escapeHtml(data.error)}</p>
                         </div>
                     `;
@@ -2222,7 +2185,7 @@
                                 <div style="margin-bottom:0.5rem;">
                                     <span class="risk-badge warning"><span class="badge-dot"></span>RESEARCH</span>
                                 </div>
-                                <h3>\uD83D\uDD0E Auto-Research Report</h3>
+                                <h3>Auto-Research Report</h3>
                                 <div class="detail-meta">
                                     <span><strong>Sources:</strong> ${(data.sources || []).length}</span>
                                     <span><strong>LLM:</strong> ${data.llm_used || 'N/A'}</span>
@@ -2242,7 +2205,7 @@
             } catch (e) {
                 container.innerHTML = `
                     <div class="info-box warn" style="background:rgba(239,68,68,0.06); border:1px solid rgba(239,68,68,0.12); border-radius:8px; padding:0.75rem 0.875rem;">
-                        <div class="box-label" style="font-family:monospace; font-size:10px; font-weight:700; color:var(--danger);">RESEARCH ERROR</div>
+                        <div class="box-label" style="font-size:10px; font-weight:700; color:var(--danger);">RESEARCH ERROR</div>
                         <p style="font-size:12px; color:var(--text-secondary);">${escapeHtml(e.message)}</p>
                     </div>
                 `;
@@ -2323,7 +2286,7 @@
             if (insights.explanation) {
                 html += `
                     <div class="info-box info" style="margin-top:0.5rem; background:rgba(59,130,246,0.05); border:1px solid rgba(59,130,246,0.12); border-radius:8px; padding:0.75rem 0.875rem;">
-                        <div class="box-label" style="font-family:monospace; font-size:10px; font-weight:700; color:var(--accent); margin-bottom:0.375rem;">AI Insights</div>
+                        <div class="box-label" style="font-size:10px; font-weight:700; color:var(--accent); margin-bottom:0.375rem;">AI Insights</div>
                         <p style="font-size:12px; line-height:1.6; color:var(--text-secondary);">${escapeHtml(insights.explanation).substring(0, 500)}</p>
                     </div>
                 `;
