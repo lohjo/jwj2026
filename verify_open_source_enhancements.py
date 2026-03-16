@@ -41,6 +41,10 @@ def _read(path: str) -> str:
     return (ROOT / path).read_text(encoding="utf-8")
 
 
+def _read_lower(path: str) -> str:
+    return _read(path).lower()
+
+
 def _function_exists(path: str, function_name: str) -> bool:
     file_path = ROOT / path
     if not file_path.exists():
@@ -87,7 +91,7 @@ def check_mirofish() -> ToolStatus:
     notes: list[str] = []
     predictor_exists = (ROOT / "research_agent" / "predictor.py").exists()
     predictor_fn = _function_exists("research_agent/predictor.py", "predict_misinfo_trends")
-    agent_src = _read("research_agent/agent.py")
+    agent_src = _read_lower("research_agent/agent.py")
     wired = "predict_misinfo_trends" in agent_src
 
     implemented = predictor_exists and predictor_fn
@@ -121,12 +125,11 @@ def check_impeccable() -> ToolStatus:
     skills_present = all(path.exists() for path in skill_files)
 
     ui_src = _read("static/index.html")
-    has_distill_evidence = "Impeccable /distill" in ui_src
-    has_colorize_evidence = "Impeccable /colorize" in ui_src
-    has_animate_evidence = "Impeccable /animate" in ui_src
+    evidence_tags = ("Impeccable /distill", "Impeccable /colorize", "Impeccable /animate")
+    has_all_evidence = all(tag in ui_src for tag in evidence_tags)
 
     implemented = skills_present
-    usable = has_distill_evidence and has_colorize_evidence and has_animate_evidence
+    usable = has_all_evidence
 
     if implemented:
         notes.append("Impeccable command skills are installed in .claude/commands/skills")
@@ -143,11 +146,11 @@ def check_impeccable() -> ToolStatus:
 
 def check_openviking() -> ToolStatus:
     notes: list[str] = []
-    requirements = _read("requirements.txt").lower()
+    requirements = _read_lower("requirements.txt")
     has_dep = "openviking" in requirements
 
-    skill_cache_src = _read("research_agent/skill_cache.py").lower()
-    agent_src = _read("research_agent/agent.py").lower()
+    skill_cache_src = _read_lower("research_agent/skill_cache.py")
+    agent_src = _read_lower("research_agent/agent.py")
     integrated = "openviking" in skill_cache_src or "openviking" in agent_src
 
     implemented = has_dep
