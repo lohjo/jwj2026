@@ -23,7 +23,7 @@ _LANG_MAP = {
     "zh-tw": "zh",
     "zh": "zh",
     "ms": "ms",
-    "id": "id",
+    "id": "ms",
     "ta": "ta",
     "th": "th",
     "vi": "vi",
