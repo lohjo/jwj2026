@@ -35,14 +35,20 @@ async def research(query: str, force_refresh: bool = False) -> dict:
     Main entrypoint for web research.
 
     Returns:
-        {
-          "summary_path": str,
-          "skill_path": str,
-          "cache_hit": bool,
-          "sources": list[str],
-          "raw_dir": str,
-          "llm_used": str
-        }
+        A dictionary with the following keys:
+            summary_path (str): Path to the saved summary file, or "" if no summary
+                was generated (e.g. cache hit or failure).
+            skill_path (str): Path to the saved skill file, or "" on failure.
+            cache_hit (bool): True if the result was served from the skill cache.
+            sources (list[str]): List of source URLs used for the research.
+            raw_dir (str): Directory containing raw scraped content, or "" if not
+                applicable (e.g. cache hit or failure before scraping).
+            llm_used (str): Identifier/name of the LLM used for summarisation, or
+                "failed" if the research could not be completed.
+            error (str, optional): Present only when the research request fails
+                (for example, when FIRECRAWL_API_KEY is not configured or when no
+                research sources are found for the query). In successful cases this
+                key is omitted.
     """
     date_prefix = datetime.now().strftime("%Y%m%d")
     slug = _slugify(query)
