@@ -312,7 +312,8 @@ gcloud run deploy sentinel \
   --memory 2Gi --cpu 2 --timeout 300 \
   --set-env-vars "TELEGRAM_TOKEN=$TELEGRAM_TOKEN" \
   --set-env-vars "GEMINI_API_KEY=$GEMINI_API_KEY" \
-  --set-env-vars "OPENAI_API_KEY=$OPENAI_API_KEY"
+  --set-env-vars "OPENAI_API_KEY=$OPENAI_API_KEY" \
+  --set-env-vars "FIRECRAWL_API_KEY=$FIRECRAWL_API_KEY"
 ```
 
 ### Verify

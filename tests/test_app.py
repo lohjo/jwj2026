@@ -479,3 +479,51 @@ def test_research_success(client):
         assert data["llm_used"] == "gemini"
     finally:
         os.unlink(tmp_path)
+
+
+def test_research_cache_hit_reads_skill_file(client):
+    """POST /research returns cached skill content when cache hits."""
+    import os
+    import tempfile
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as f:
+        f.write("---\ntopic: test\n---\n\n# Cached Skill\nCached summary")
+        tmp_path = f.name
+
+    try:
+        mock_result = {
+            "summary_path": "",
+            "skill_path": tmp_path,
+            "cache_hit": True,
+            "sources": ["https://example.com/cached"],
+            "raw_dir": "",
+            "llm_used": "",
+        }
+        with patch("research_agent.agent.research", new_callable=AsyncMock, return_value=mock_result):
+            res = client.post("/research", json={"query": "fact check: cached query"})
+
+        assert res.status_code == 200
+        data = res.json()
+        assert "Cached Skill" in data["summary"]
+        assert data["cache_hit"] is True
+    finally:
+        os.unlink(tmp_path)
+
+
+def test_research_propagates_agent_error(client):
+    """POST /research surfaces a structured research-agent error."""
+    mock_result = {
+        "summary_path": "",
+        "skill_path": "",
+        "cache_hit": False,
+        "sources": [],
+        "raw_dir": "",
+        "llm_used": "failed",
+        "error": "Research unavailable: FIRECRAWL_API_KEY is not configured on the server.",
+    }
+    with patch("research_agent.agent.research", new_callable=AsyncMock, return_value=mock_result):
+        res = client.post("/research", json={"query": "fact check: test"})
+
+    assert res.status_code == 200
+    data = res.json()
+    assert data["error"].startswith("Research unavailable")

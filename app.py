@@ -918,16 +918,23 @@ async def research_endpoint(body: ResearchRequest):
         result = await research(query)
 
         summary_text = ""
-        if result.get("summary_path") and os.path.exists(result["summary_path"]):
-            with open(result["summary_path"], "r", encoding="utf-8") as f:
+        summary_path = result.get("summary_path")
+        if not summary_path and result.get("cache_hit"):
+            summary_path = result.get("skill_path")
+
+        if summary_path and os.path.exists(summary_path):
+            with open(summary_path, "r", encoding="utf-8") as f:
                 summary_text = f.read()
 
-        return {
+        response = {
             "summary": summary_text,
             "sources": result.get("sources", []),
             "cache_hit": result.get("cache_hit", False),
             "llm_used": result.get("llm_used", ""),
         }
+        if result.get("error"):
+            response["error"] = result["error"]
+        return response
     except ImportError:
         return JSONResponse(status_code=503, content={"error": "Research agent not available"})
     except Exception as e:

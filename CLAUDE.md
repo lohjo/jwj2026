@@ -524,6 +524,7 @@ gcloud run deploy sentinel \
   --set-env-vars "GROQ_API_KEY=$GROQ_API_KEY" \
   --set-env-vars "DEEPGRAM_API_KEY=$DEEPGRAM_API_KEY" \
   --set-env-vars "ELEVENLABS_API_KEY=$ELEVENLABS_API_KEY" \
+  --set-env-vars "FIRECRAWL_API_KEY=$FIRECRAWL_API_KEY" \
   --set-env-vars "CLICKHOUSE_HOST=$CLICKHOUSE_HOST" \
   --set-env-vars "CLICKHOUSE_PASSWORD=$CLICKHOUSE_PASSWORD" \
   --set-env-vars "GOOGLE_GENAI_USE_VERTEXAI=FALSE"

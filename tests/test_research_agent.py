@@ -101,6 +101,7 @@ class TestResearch:
         ]
 
         with patch("research_agent.agent.skill_cache") as mock_cache, \
+             patch("research_agent.agent.FIRECRAWL_API_KEY", "fake-key"), \
              patch("research_agent.agent.search_and_scrape", new_callable=AsyncMock, return_value=pages), \
              patch("research_agent.agent.summarise", new_callable=AsyncMock) as mock_sum, \
              patch("research_agent.agent.SUMMARIES_DIR", tmp_path / "summaries"), \
@@ -132,6 +133,7 @@ class TestResearch:
         ]
 
         with patch("research_agent.agent.skill_cache") as mock_cache, \
+             patch("research_agent.agent.FIRECRAWL_API_KEY", "fake-key"), \
              patch("research_agent.agent.search_and_scrape", new_callable=AsyncMock, return_value=pages), \
              patch("research_agent.agent.summarise", new_callable=AsyncMock) as mock_sum, \
              patch("research_agent.agent.SUMMARIES_DIR", tmp_path / "summaries"), \
@@ -163,6 +165,7 @@ class TestResearch:
         ]
 
         with patch("research_agent.agent.skill_cache") as mock_cache, \
+             patch("research_agent.agent.FIRECRAWL_API_KEY", "fake-key"), \
              patch("research_agent.agent.search_and_scrape", new_callable=AsyncMock, return_value=pages), \
              patch("research_agent.agent.summarise", new_callable=AsyncMock) as mock_sum, \
              patch("research_agent.agent.SUMMARIES_DIR", tmp_path / "summaries"), \
@@ -200,3 +203,15 @@ class TestResearch:
             from research_agent.agent import research
             result = await research("topic")
             assert result["cache_hit"] is True
+
+    @pytest.mark.asyncio
+    async def test_returns_error_when_firecrawl_key_missing(self):
+        with patch("research_agent.agent.FIRECRAWL_API_KEY", ""), \
+             patch("research_agent.agent.skill_cache") as mock_cache:
+            mock_cache.lookup.return_value = (None, 0.0)
+
+            from research_agent.agent import research
+            result = await research("fact check: test")
+
+            assert result["llm_used"] == "failed"
+            assert result["error"].startswith("Research unavailable:")
