@@ -85,10 +85,23 @@ def _verdict_str(detection_result: dict) -> str:
 
 def _schedule_log(row: dict) -> None:
     """Fire-and-forget ClickHouse log — never raises."""
+    _schedule_background(asyncio.to_thread(log_to_clickhouse, row))
+
+
+def _schedule_background(coro) -> None:
+    """
+    Schedule a background coroutine safely.
+
+    If scheduling fails (or is mocked in tests), close the coroutine to avoid
+    un-awaited coroutine warnings.
+    """
     try:
-        asyncio.create_task(asyncio.to_thread(log_to_clickhouse, row))
+        scheduled = asyncio.create_task(coro)
+        if not isinstance(scheduled, asyncio.Task):
+            coro.close()
     except Exception:
-        logger.debug("Failed to schedule ClickHouse log", exc_info=True)
+        coro.close()
+        logger.debug("Failed to schedule background task", exc_info=True)
 
 
 # ── Auto-research background task ────────────────────────────────────
@@ -347,7 +360,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await update.message.reply_text(response, parse_mode="HTML")
 
         # Step 6: Background tasks
-        asyncio.create_task(
+        _schedule_background(
             _auto_research_if_flagged(
                 english_text, det, misinfo, update, context, source_lang=source_lang,
             )
@@ -445,7 +458,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         )
         await update.message.reply_text(response, parse_mode="HTML")
 
-        asyncio.create_task(
+        _schedule_background(
             _auto_research_if_flagged(
                 guard_input, det, misinfo, update, context, source_lang=source_lang,
             )
@@ -567,7 +580,7 @@ async def handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             logger.info("TTS reply skipped — Live API and ElevenLabs both unavailable")
 
         # Background tasks
-        asyncio.create_task(
+        _schedule_background(
             _auto_research_if_flagged(
                 english_text, det, results.get("misinfo_result"), update, context,
                 source_lang=source_lang,
@@ -676,7 +689,7 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         )
         await update.message.reply_text(response, parse_mode="HTML")
 
-        asyncio.create_task(
+        _schedule_background(
             _auto_research_if_flagged(
                 guard_input, det, results.get("misinfo_result"), update, context,
                 source_lang=source_lang,
