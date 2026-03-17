@@ -1147,6 +1147,7 @@
             const decoder = new TextDecoder();
             let buffer = '';
             let result = null;
+            let currentEvent = '';
 
             while (true) {
                 const { done, value } = await reader.read();
@@ -1156,7 +1157,6 @@
                 const lines = buffer.split('\n');
                 buffer = lines.pop() || '';
 
-                let currentEvent = '';
                 for (const line of lines) {
                     if (line.startsWith('event: ')) {
                         currentEvent = line.slice(7);
@@ -1408,6 +1408,7 @@
             const decoder = new TextDecoder();
             let buffer = '';
             let result = null;
+            let currentEvent = '';
 
             while (true) {
                 const { done, value } = await reader.read();
@@ -1417,7 +1418,6 @@
                 const lines = buffer.split('\n');
                 buffer = lines.pop() || '';
 
-                let currentEvent = '';
                 for (const line of lines) {
                     if (line.startsWith('event: ')) {
                         currentEvent = line.slice(7);
@@ -1433,6 +1433,8 @@
             if (result) {
                 await new Promise(r => setTimeout(r, 600));
                 showAnalysisResults(result);
+            } else {
+                throw new Error('Analysis did not return a final result');
             }
 
         } catch (e) {
