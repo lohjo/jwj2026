@@ -195,6 +195,32 @@ class TestScheduleLog:
             mock_task.assert_called_once()
 
 
+class TestScheduleBackground:
+    def test_closes_coro_when_create_task_fails(self):
+        from telegram_bot import _schedule_background
+
+        async def _noop():
+            return None
+
+        coro = _noop()
+        with patch("telegram_bot.asyncio.create_task", side_effect=RuntimeError("no loop")):
+            _schedule_background(coro)
+
+        assert coro.cr_frame is None
+
+    def test_closes_coro_when_create_task_is_mocked(self):
+        from telegram_bot import _schedule_background
+
+        async def _noop():
+            return None
+
+        coro = _noop()
+        with patch("telegram_bot.asyncio.create_task", return_value=MagicMock()):
+            _schedule_background(coro)
+
+        assert coro.cr_frame is None
+
+
 # ═══════════════════════════════════════════════════════════════════════
 # SECTION 3 — /start AND /help COMMANDS
 # ═══════════════════════════════════════════════════════════════════════
