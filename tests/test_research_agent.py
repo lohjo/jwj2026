@@ -205,9 +205,13 @@ class TestResearch:
             assert result["cache_hit"] is True
 
     @pytest.mark.asyncio
-    async def test_returns_error_when_firecrawl_key_missing(self):
+    async def test_returns_error_when_firecrawl_key_missing(self, tmp_path):
         with patch("research_agent.agent.FIRECRAWL_API_KEY", ""), \
-             patch("research_agent.agent.skill_cache") as mock_cache:
+             patch("research_agent.agent.skill_cache") as mock_cache, \
+             patch("research_agent.agent.RESEARCH_DIR", tmp_path / "research"), \
+             patch("research_agent.agent.SUMMARIES_DIR", tmp_path / "summaries"), \
+             patch("research_agent.agent.SKILLS_DIR", tmp_path / "skills"), \
+             patch("research_agent.agent.RAW_DIR", tmp_path / "raw"):
             mock_cache.lookup.return_value = (None, 0.0)
 
             from research_agent.agent import research
