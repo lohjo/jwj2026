@@ -11,6 +11,7 @@ import sys
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
+from typing import Any, Coroutine
 
 from telegram import Update
 from telegram.ext import (
@@ -88,7 +89,7 @@ def _schedule_log(row: dict) -> None:
     _schedule_background(asyncio.to_thread(log_to_clickhouse, row))
 
 
-def _schedule_background(coro) -> None:
+def _schedule_background(coro: Coroutine[Any, Any, Any]) -> None:
     """
     Schedule a background coroutine safely.
 
