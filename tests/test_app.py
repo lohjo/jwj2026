@@ -76,6 +76,14 @@ def test_root_html_copy_helpers_are_event_safe(client):
     assert "if (!detailsEl || !verdictEl || !transcriptEl || !resultsEl) return;" in res.text
 
 
+def test_root_html_image_sse_parser_keeps_event_state_across_chunks(client):
+    """Image SSE parser should persist currentEvent between stream chunks."""
+    res = client.get("/")
+    assert res.status_code == 200
+    assert "let buffer = '', result = null, currentEvent = '';" in res.text
+    assert "Image analysis did not return a final result" in res.text
+
+
 # ---------------------------------------------------------------------------
 # Text detection
 # ---------------------------------------------------------------------------
