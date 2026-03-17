@@ -44,9 +44,6 @@ async def research(query: str, force_refresh: bool = False) -> dict:
           "llm_used": str
         }
     """
-    for d in (RAW_DIR, SUMMARIES_DIR, SKILLS_DIR):
-        d.mkdir(parents=True, exist_ok=True)
-
     date_prefix = datetime.now().strftime("%Y%m%d")
     slug = _slugify(query)
     folder_name = f"{date_prefix}_{slug}"
@@ -90,6 +87,9 @@ async def research(query: str, force_refresh: bool = False) -> dict:
             "llm_used": "failed",
             "error": "No research sources found for this query.",
         }
+
+    for d in (RAW_DIR, SUMMARIES_DIR, SKILLS_DIR):
+        d.mkdir(parents=True, exist_ok=True)
 
     # ── Step 3: Save raw scraped content ──
     raw_subdir = RAW_DIR / folder_name
