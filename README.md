@@ -4,9 +4,7 @@
 
 > **Gemini Live Agent Challenge:** A multimodal AI content detection system that analyses text, images, audio, and video for signs of AI generation, misinformation, and manipulation — and proactively predicts what misinformation will emerge from official announcements before it spreads.
 
----
-
-<img width="1280" height="640" alt="image" src="https://github.com/user-attachments/assets/4cf49266-f8da-409d-93dc-3b4747da2be3" />
+<img width="640" height="380" alt="image" src="https://github.com/user-attachments/assets/4cf49266-f8da-409d-93dc-3b4747da2be3" />
 **Test it here: ** [Link to app](https://sentinel-907933353915.asia-southeast1.run.app)
 
 ---
