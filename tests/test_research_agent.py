@@ -214,4 +214,4 @@ class TestResearch:
             result = await research("fact check: test")
 
             assert result["llm_used"] == "failed"
-            assert result["error"].startswith("Research unavailable:")
+            assert result["error"] == "Research unavailable: FIRECRAWL_API_KEY is not configured on the server."

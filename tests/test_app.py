@@ -526,4 +526,4 @@ def test_research_propagates_agent_error(client):
 
     assert res.status_code == 200
     data = res.json()
-    assert data["error"].startswith("Research unavailable")
+    assert data["error"] == "Research unavailable: FIRECRAWL_API_KEY is not configured on the server."
