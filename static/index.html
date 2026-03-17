@@ -1869,14 +1869,13 @@
 
             const reader  = res.body.getReader();
             const decoder = new TextDecoder();
-            let buffer = '', result = null;
+            let buffer = '', result = null, currentEvent = '';
 
             while (true) {
                 const { done, value } = await reader.read();
                 if (done) break;
                 buffer += decoder.decode(value, { stream: true });
                 const lines = buffer.split('\n'); buffer = lines.pop() || '';
-                let currentEvent = '';
                 for (const line of lines) {
                     if      (line.startsWith('event: ')) currentEvent = line.slice(7);
                     else if (line.startsWith('data: ')) {
@@ -1887,7 +1886,12 @@
                     }
                 }
             }
-            if (result) { await new Promise(r => setTimeout(r, 600)); showImageResults(result); }
+            if (result) {
+                await new Promise(r => setTimeout(r, 600));
+                showImageResults(result);
+            } else {
+                throw new Error('Image analysis did not return a final result');
+            }
         } catch (e) {
             console.error('Image SSE error:', e);
             document.getElementById('image-processing-phase').style.display = 'none';
