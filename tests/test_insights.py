@@ -61,6 +61,22 @@ async def test_returns_empty_when_both_fail():
 
 
 @pytest.mark.asyncio
+async def test_returns_empty_when_vertex_location_missing():
+    mock_primary_client = MagicMock()
+    mock_primary_client.models.generate_content.side_effect = RuntimeError("Gemini down")
+
+    with patch("pipeline.insights.genai") as mock_genai, \
+         patch("pipeline.insights.GOOGLE_CLOUD_PROJECT", "test-project"), \
+         patch("pipeline.insights.GOOGLE_CLOUD_LOCATION", ""):
+        mock_genai.Client.return_value = mock_primary_client
+
+        from pipeline.insights import call_llm
+        text, llm_used = await call_llm("test prompt")
+        assert text == ""
+        assert llm_used == "failed"
+
+
+@pytest.mark.asyncio
 async def test_never_raises():
     with patch("pipeline.insights.genai") as mock_genai, \
          patch("pipeline.insights.GOOGLE_CLOUD_PROJECT", "test-project"):

@@ -75,6 +75,9 @@ async def call_llm(prompt: str, max_tokens: int = 1024) -> tuple[str, str]:
     if not GOOGLE_CLOUD_PROJECT:
         logger.error("[LLM] GOOGLE_CLOUD_PROJECT not set — cannot fall back to Vertex AI")
         return "", "failed"
+    if not GOOGLE_CLOUD_LOCATION:
+        logger.error("[LLM] GOOGLE_CLOUD_LOCATION not set — cannot fall back to Vertex AI")
+        return "", "failed"
 
     try:
         client = genai.Client(
