@@ -102,8 +102,8 @@ SENTINEL_APPEND_PROMPT = """
 ### LLM Fallback Pattern
 When generating code that calls an LLM:
 1. Try Gemini first via pipeline/insights.py::call_llm()
-2. On ANY exception (not just rate limits): fall back to Vertex AI routing automatically (same Gemini model, GCP auth path)
-3. Set model_versions["llm_used"] = "gemini" | "vertex" | "failed" in every ClickHouse row
+2. On ANY exception (not just rate limits): fall back to Groq automatically
+3. Set model_versions["llm_used"] = "gemini" | "groq" | "failed" in every ClickHouse row
 4. Return "" on total failure — callers must handle empty string explicitly
 
 ### Detection Return Shape
