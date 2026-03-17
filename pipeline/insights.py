@@ -1,5 +1,5 @@
 """
-pipeline/insights.py — Unified LLM call with Gemini API→Vertex AI fallback.
+pipeline/insights.py — Unified LLM call with Gemini→Groq fallback.
 
 All LLM calls in the project MUST go through call_llm().
 """
@@ -8,12 +8,14 @@ import asyncio
 import logging
 
 from google import genai
+from openai import OpenAI
 
 from config import (
     GEMINI_API_KEY,
     GEMINI_MODEL,
-    GOOGLE_CLOUD_LOCATION,
-    GOOGLE_CLOUD_PROJECT,
+    GROQ_API_KEY,
+    GROQ_MODEL,
+    GROQ_API_BASE,
 )
 
 logger = logging.getLogger(__name__)
@@ -34,7 +36,7 @@ def _classify_gemini_error(err: Exception) -> str:
 
 async def call_llm(prompt: str, max_tokens: int = 1024) -> tuple[str, str]:
     """
-    Call Gemini via API key. If it fails for ANY reason, fall back to Vertex AI.
+    Call Gemini 1.5-flash. If it fails for ANY reason, fall back to Groq.
 
     Never raises — returns empty string on total failure.
 
@@ -44,7 +46,7 @@ async def call_llm(prompt: str, max_tokens: int = 1024) -> tuple[str, str]:
 
     Returns:
         Tuple of (response_text, llm_used) where llm_used is
-        "gemini" | "vertex" | "failed".
+        "gemini" | "groq" | "failed".
     """
     # ── Primary: Gemini ─────────────────────────────────────────────────
     try:
@@ -66,40 +68,33 @@ async def call_llm(prompt: str, max_tokens: int = 1024) -> tuple[str, str]:
     except Exception as gemini_err:
         reason = _classify_gemini_error(gemini_err)
         logger.warning(
-            "[LLM] Gemini failed (reason=%s, error=%s), falling back to Vertex AI",
+            "[LLM] Gemini failed (reason=%s, error=%s), falling back to Groq",
             reason,
             gemini_err,
         )
 
-    # ── Fallback: Vertex AI ─────────────────────────────────────────────
-    if not GOOGLE_CLOUD_PROJECT:
-        logger.error("[LLM] GOOGLE_CLOUD_PROJECT not set — cannot fall back to Vertex AI")
-        return "", "failed"
-    if not GOOGLE_CLOUD_LOCATION:
-        logger.error("[LLM] GOOGLE_CLOUD_LOCATION not set — cannot fall back to Vertex AI")
+    # ── Fallback: Groq ──────────────────────────────────────────────────
+    if not GROQ_API_KEY:
+        logger.error("[LLM] GROQ_API_KEY not set — cannot fall back")
         return "", "failed"
 
     try:
-        client = genai.Client(
-            vertexai=True,
-            project=GOOGLE_CLOUD_PROJECT,
-            location=GOOGLE_CLOUD_LOCATION,
-        )
+        client = OpenAI(api_key=GROQ_API_KEY, base_url=GROQ_API_BASE)
         response = await asyncio.to_thread(
-            client.models.generate_content,
-            model=GEMINI_MODEL,
-            contents=prompt,
-            config={"max_output_tokens": max_tokens},
+            client.chat.completions.create,
+            model=GROQ_MODEL,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=max_tokens,
+            temperature=0.3,
+            timeout=20.0,
         )
-        text = response.text.strip()
-        if text:
-            logger.info("[LLM] Vertex AI fallback OK")
-            return text, "vertex"
-        raise ValueError("Empty Vertex AI response")
+        text = response.choices[0].message.content.strip()
+        logger.info("[LLM] Groq fallback OK")
+        return text, "groq"
 
-    except Exception as vertex_err:
+    except Exception as groq_err:
         logger.error(
-            "[LLM] Both Gemini and Vertex AI failed. Vertex error: %s", vertex_err
+            "[LLM] Both Gemini and Groq failed. Groq error: %s", groq_err
         )
         return "", "failed"
 
