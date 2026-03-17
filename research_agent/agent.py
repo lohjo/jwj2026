@@ -13,7 +13,7 @@ import re
 from datetime import datetime
 from pathlib import Path
 
-from config import RESEARCH_DIR
+from config import FIRECRAWL_API_KEY, RESEARCH_DIR
 from research_agent.crawler import search_and_scrape
 from research_agent.summariser import summarise
 from research_agent import skill_cache
@@ -66,6 +66,18 @@ async def research(query: str, force_refresh: bool = False) -> dict:
             }
 
     # ── Step 2: Search + scrape via Firecrawl ──
+    if not FIRECRAWL_API_KEY:
+        logger.warning("Research unavailable: FIRECRAWL_API_KEY not configured")
+        return {
+            "summary_path": "",
+            "skill_path": "",
+            "cache_hit": False,
+            "sources": [],
+            "raw_dir": "",
+            "llm_used": "failed",
+            "error": "Research unavailable: FIRECRAWL_API_KEY is not configured on the server.",
+        }
+
     pages = await search_and_scrape(query, num_results=6)
     if not pages:
         logger.warning("No search results for '%s'", query)
@@ -76,6 +88,7 @@ async def research(query: str, force_refresh: bool = False) -> dict:
             "sources": [],
             "raw_dir": "",
             "llm_used": "failed",
+            "error": "No research sources found for this query.",
         }
 
     # ── Step 3: Save raw scraped content ──
