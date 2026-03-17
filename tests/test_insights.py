@@ -24,35 +24,35 @@ async def test_returns_gemini_response_on_success():
 
 
 @pytest.mark.asyncio
-async def test_falls_back_to_groq_on_gemini_exception():
-    mock_completion = MagicMock()
-    mock_completion.choices = [MagicMock()]
-    mock_completion.choices[0].message.content = "Groq response"
+async def test_falls_back_to_vertex_on_gemini_exception():
+    mock_primary_client = MagicMock()
+    mock_primary_client.models.generate_content.side_effect = RuntimeError("Gemini down")
+
+    mock_vertex_response = MagicMock()
+    mock_vertex_response.text = "Vertex response"
+    mock_vertex_client = MagicMock()
+    mock_vertex_client.models.generate_content.return_value = mock_vertex_response
 
     with patch("pipeline.insights.genai") as mock_genai, \
-         patch("pipeline.insights.OpenAI") as mock_openai_cls, \
-         patch("pipeline.insights.GROQ_API_KEY", "test-groq-key"):
-        mock_genai.Client.side_effect = RuntimeError("Gemini down")
-
-        mock_client = MagicMock()
-        mock_client.chat.completions.create.return_value = mock_completion
-        mock_openai_cls.return_value = mock_client
+         patch("pipeline.insights.GOOGLE_CLOUD_PROJECT", "test-project"):
+        mock_genai.Client.side_effect = [mock_primary_client, mock_vertex_client]
 
         from pipeline.insights import call_llm
         text, llm_used = await call_llm("test prompt")
-        assert text == "Groq response"
-        assert llm_used == "groq"
+        assert text == "Vertex response"
+        assert llm_used == "vertex"
 
 
 @pytest.mark.asyncio
 async def test_returns_empty_when_both_fail():
-    with patch("pipeline.insights.genai") as mock_genai, \
-         patch("pipeline.insights.OpenAI") as mock_openai_cls:
-        mock_genai.Client.side_effect = RuntimeError("Gemini down")
+    mock_primary_client = MagicMock()
+    mock_primary_client.models.generate_content.side_effect = RuntimeError("Gemini down")
+    mock_vertex_client = MagicMock()
+    mock_vertex_client.models.generate_content.side_effect = RuntimeError("Vertex down")
 
-        mock_client = MagicMock()
-        mock_client.chat.completions.create.side_effect = RuntimeError("Groq down")
-        mock_openai_cls.return_value = mock_client
+    with patch("pipeline.insights.genai") as mock_genai, \
+         patch("pipeline.insights.GOOGLE_CLOUD_PROJECT", "test-project"):
+        mock_genai.Client.side_effect = [mock_primary_client, mock_vertex_client]
 
         from pipeline.insights import call_llm
         text, llm_used = await call_llm("test prompt")
@@ -63,9 +63,8 @@ async def test_returns_empty_when_both_fail():
 @pytest.mark.asyncio
 async def test_never_raises():
     with patch("pipeline.insights.genai") as mock_genai, \
-         patch("pipeline.insights.OpenAI") as mock_openai_cls:
+         patch("pipeline.insights.GOOGLE_CLOUD_PROJECT", "test-project"):
         mock_genai.Client.side_effect = Exception("unexpected")
-        mock_openai_cls.side_effect = Exception("unexpected")
 
         from pipeline.insights import call_llm
         # Should not raise
