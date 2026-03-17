@@ -1,0 +1,90 @@
+@import "tailwindcss";
+
+:root {
+  /* Surfaces */
+  --bg-primary:    #0b0e14;
+  --bg-card:       rgba(255, 255, 255, 0.03);
+  --bg-card-hover: rgba(255, 255, 255, 0.055);
+  --border-subtle: rgba(255, 255, 255, 0.07);
+  --border-active: rgba(255, 255, 255, 0.13);
+
+  /* Text */
+  --text-primary:   #e0e3eb;
+  --text-secondary: rgba(255, 255, 255, 0.58);
+  --text-tertiary:  rgba(255, 255, 255, 0.36);
+  --text-muted:     rgba(255, 255, 255, 0.22);
+
+  /* Risk */
+  --risk-critical: #ef4444;
+  --risk-high:     #f59e0b;
+  --risk-medium:   #3b82f6;
+  --risk-low:      #22c55e;
+
+  /* Primary action — trust teal, not emergency red */
+  --accent:        #0d9488;
+  --accent-hover:  #0f766e;
+  --accent-dim:    rgba(13, 148, 136, 0.12);
+  --accent-border: rgba(13, 148, 136, 0.28);
+
+  /* Status */
+  --status-green:  #22c55e;
+  --status-red:    #ef4444;
+}
+
+@theme inline {
+  --color-bg-primary:     var(--bg-primary);
+  --color-bg-card:        var(--bg-card);
+  --color-bg-card-hover:  var(--bg-card-hover);
+  --color-border-subtle:  var(--border-subtle);
+  --color-border-active:  var(--border-active);
+  --color-text-primary:   var(--text-primary);
+  --color-text-secondary: var(--text-secondary);
+  --color-text-tertiary:  var(--text-tertiary);
+  --color-text-muted:     var(--text-muted);
+  --color-risk-critical:  var(--risk-critical);
+  --color-risk-high:      var(--risk-high);
+  --color-risk-medium:    var(--risk-medium);
+  --color-risk-low:       var(--risk-low);
+  --color-accent:         var(--accent);
+  --color-accent-hover:   var(--accent-hover);
+  --color-status-green:   var(--status-green);
+  --color-status-red:     var(--status-red);
+  --font-sans:  'Source Sans 3', 'Segoe UI', system-ui, sans-serif;
+  --font-mono:  'JetBrains Mono', 'Fira Code', monospace;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.35; }
+}
+
+body {
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+}
+
+/* dot-grid body::before — REMOVED /distill */
+
+::selection {
+  background: rgba(13, 148, 136, 0.28);
+}
+
+textarea:focus {
+  border-color: var(--accent-border) !important;
+  box-shadow: 0 0 0 2px rgba(13, 148, 136, 0.08);
+}
+
+.rumour-card:hover {
+  background: var(--bg-card-hover) !important;
+  border-color: var(--border-active) !important;
+  transform: translateY(-1px);
+}
