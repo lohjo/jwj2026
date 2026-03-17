@@ -1181,6 +1181,9 @@
                 }
                 await new Promise(r => setTimeout(r, 450));
                 showPredictionResults(result);
+            } else {
+                // If the stream ended without a result event, treat this as an error so the UI is not left in a loading state.
+                throw new Error('Prediction stream ended without a result event');
             }
 
         } catch (e) {
