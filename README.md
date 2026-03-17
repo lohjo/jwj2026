@@ -2,9 +2,11 @@
 
 ### Full-Spectrum Information Integrity Platform for Singapore
 
+<img width="1919" height="1198" alt="image" src="https://github.com/user-attachments/assets/4cf49266-f8da-409d-93dc-3b4747da2be3" />
+
 > **Gemini Live Agent Challenge:** A multimodal AI content detection system that analyses text, images, audio, and video for signs of AI generation, misinformation, and manipulation — and proactively predicts what misinformation will emerge from official announcements before it spreads.
 
-Test it here : [Link](https://sentinel-907933353915.asia-southeast1.run.app)
+** Test it here : [Link](https://sentinel-907933353915.asia-southeast1.run.app) **
 ---
 
 ## The Problem
