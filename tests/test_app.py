@@ -283,6 +283,18 @@ def test_analyse_audio_rejects_empty_file(client):
     assert "Empty audio file" in res.json()["error"]
 
 
+def test_analyse_audio_accepts_known_extension_with_generic_content_type(client):
+    """Known audio extension is accepted even when browser sends generic content-type."""
+    with patch("app.live_voice_exchange", new_callable=AsyncMock, return_value=b""):
+        res = client.post(
+            "/analyse-audio",
+            files={"file": ("voice.webm", b"fake_audio_data", "text/plain")},
+        )
+    assert res.status_code == 200
+    data = res.json()
+    assert "success" in data
+
+
 # ---------------------------------------------------------------------------
 # WebSocket live audio
 # ---------------------------------------------------------------------------

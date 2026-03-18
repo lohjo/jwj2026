@@ -108,8 +108,14 @@ def _validate_upload(
     """
     Validate common upload constraints for media endpoints.
 
+    Args:
+        file: Uploaded file object from FastAPI.
+        allowed_extensions: Allowed filename extensions (lowercase, with dot).
+        allowed_content_prefix: Expected MIME type prefix (image, audio, video).
+        media_label: Human-readable media name for error messages.
+
     Returns:
-        (error_message, extension)
+        (error_message | None, file_extension)
     """
     filename = (file.filename or "").strip()
     if not filename:
@@ -118,6 +124,8 @@ def _validate_upload(
     ext = os.path.splitext(filename)[1].lower()
     content_type = (file.content_type or "").lower()
 
+    # Intentionally allow either known extension OR matching content-type prefix.
+    # Some clients may send generic filenames (or vice versa) while MIME is correct.
     extension_ok = ext in allowed_extensions
     content_type_ok = content_type.startswith(f"{allowed_content_prefix}/")
     if not extension_ok and not content_type_ok:
@@ -127,10 +135,10 @@ def _validate_upload(
         file.file.seek(0, os.SEEK_END)
         size = file.file.tell()
         file.file.seek(0)
-    except Exception:
+    except (OSError, ValueError, AttributeError):
         size = None
 
-    if size == 0:
+    if size is not None and size == 0:
         return f"Empty {media_label} file", ext
 
     return None, ext
