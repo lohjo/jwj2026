@@ -263,6 +263,26 @@ def test_analyse_audio_failure(client):
     assert data["success"] is False
 
 
+def test_analyse_audio_rejects_unsupported_file_type(client):
+    """POST /analyse-audio rejects non-audio uploads with 400."""
+    res = client.post(
+        "/analyse-audio",
+        files={"file": ("test.txt", b"not_audio", "text/plain")},
+    )
+    assert res.status_code == 400
+    assert "Unsupported audio format" in res.json()["error"]
+
+
+def test_analyse_audio_rejects_empty_file(client):
+    """POST /analyse-audio rejects empty uploads with 400."""
+    res = client.post(
+        "/analyse-audio",
+        files={"file": ("empty.webm", b"", "audio/webm")},
+    )
+    assert res.status_code == 400
+    assert "Empty audio file" in res.json()["error"]
+
+
 # ---------------------------------------------------------------------------
 # WebSocket live audio
 # ---------------------------------------------------------------------------
@@ -309,6 +329,20 @@ def test_websocket_live_audio_api_failure(client):
 
             done = ws.receive_text()
             assert done == "DONE"
+
+
+# ---------------------------------------------------------------------------
+# Video upload validation
+# ---------------------------------------------------------------------------
+
+def test_detect_video_rejects_non_video_upload(client):
+    """POST /detect-video rejects non-video uploads with 400."""
+    res = client.post(
+        "/detect-video",
+        files={"file": ("notes.txt", b"not_video", "text/plain")},
+    )
+    assert res.status_code == 400
+    assert "Unsupported video format" in res.json()["error"]
 
 
 # ---------------------------------------------------------------------------
@@ -392,6 +426,16 @@ def test_analyse_image_stream_handles_vision_failure(client):
     body = res.text
     # Vision error should not crash the pipeline
     assert "event: result" in body
+
+
+def test_analyse_image_stream_rejects_non_image_upload(client):
+    """Image SSE endpoint rejects non-image uploads with 400."""
+    res = client.post(
+        "/analyse-image-stream",
+        files={"file": ("test.txt", b"not_image", "text/plain")},
+    )
+    assert res.status_code == 400
+    assert "Unsupported image format" in res.json()["error"]
 
 
 # ---------------------------------------------------------------------------

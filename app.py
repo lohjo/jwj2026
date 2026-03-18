@@ -59,6 +59,8 @@ AUDIO_MIME_TYPES = {
     ".ogg": "audio/ogg", ".mp3": "audio/mpeg", ".wav": "audio/wav",
     ".webm": "audio/webm", ".mp4": "audio/mp4", ".m4a": "audio/mp4",
 }
+IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif", ".tiff", ".tif"}
+VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".webm", ".mkv", ".m4v"}
 
 
 @asynccontextmanager
@@ -94,6 +96,44 @@ def _safe_path(filename: str) -> str:
     """Generate a safe upload path using a UUID prefix to avoid path traversal."""
     safe_name = os.path.basename(filename or "upload")
     return os.path.join(UPLOAD_FOLDER, f"{uuid.uuid4().hex}_{safe_name}")
+
+
+def _validate_upload(
+    file: UploadFile,
+    *,
+    allowed_extensions: set[str],
+    allowed_content_prefix: str,
+    media_label: str,
+) -> tuple[str | None, str]:
+    """
+    Validate common upload constraints for media endpoints.
+
+    Returns:
+        (error_message, extension)
+    """
+    filename = (file.filename or "").strip()
+    if not filename:
+        return f"{media_label} filename is required", ""
+
+    ext = os.path.splitext(filename)[1].lower()
+    content_type = (file.content_type or "").lower()
+
+    extension_ok = ext in allowed_extensions
+    content_type_ok = content_type.startswith(f"{allowed_content_prefix}/")
+    if not extension_ok and not content_type_ok:
+        return f"Unsupported {media_label} format", ext
+
+    try:
+        file.file.seek(0, os.SEEK_END)
+        size = file.file.tell()
+        file.file.seek(0)
+    except Exception:
+        size = None
+
+    if size == 0:
+        return f"Empty {media_label} file", ext
+
+    return None, ext
 
 
 # ── Web Interface ─────────────────────────────────────────────────────────────
@@ -152,6 +192,14 @@ async def detect_image(file: UploadFile = File(...)):
     """Analyse an image for AI-generation signals and extract OCR text."""
     if extract_text_from_image is None:
         return JSONResponse(status_code=503, content={"error": "Image detection not available"})
+    error, _ = _validate_upload(
+        file,
+        allowed_extensions=IMAGE_EXTENSIONS,
+        allowed_content_prefix="image",
+        media_label="image",
+    )
+    if error:
+        return JSONResponse(status_code=400, content={"error": error})
     path = _safe_path(file.filename)
     try:
         with open(path, "wb") as buffer:
@@ -175,6 +223,14 @@ async def detect_manipulation_endpoint(file: UploadFile = File(...)):
     """
     if detect_image_manipulation is None:
         return JSONResponse(status_code=503, content={"error": "Image manipulation detection not available"})
+    error, _ = _validate_upload(
+        file,
+        allowed_extensions=IMAGE_EXTENSIONS,
+        allowed_content_prefix="image",
+        media_label="image",
+    )
+    if error:
+        return JSONResponse(status_code=400, content={"error": error})
     path = _safe_path(file.filename)
     try:
         with open(path, "wb") as buffer:
@@ -198,6 +254,14 @@ async def ocr_endpoint(file: UploadFile = File(...)):
     """
     if extract_text_from_image is None:
         return JSONResponse(status_code=503, content={"error": "OCR not available"})
+    error, _ = _validate_upload(
+        file,
+        allowed_extensions=IMAGE_EXTENSIONS,
+        allowed_content_prefix="image",
+        media_label="image",
+    )
+    if error:
+        return JSONResponse(status_code=400, content={"error": error})
     path = _safe_path(file.filename)
     try:
         with open(path, "wb") as buffer:
@@ -219,6 +283,14 @@ async def detect_video(file: UploadFile = File(...)):
     """Analyse a video by sampling frames for AI-generation signals."""
     if analyse_video is None:
         return JSONResponse(status_code=503, content={"error": "Video detection not available"})
+    error, _ = _validate_upload(
+        file,
+        allowed_extensions=VIDEO_EXTENSIONS,
+        allowed_content_prefix="video",
+        media_label="video",
+    )
+    if error:
+        return JSONResponse(status_code=400, content={"error": error})
     path = _safe_path(file.filename)
     try:
         with open(path, "wb") as buffer:
@@ -466,6 +538,14 @@ async def analyse_image_stream(file: UploadFile = File(...)):
     """
     if analyse_image_with_gemini is None:
         return JSONResponse(status_code=503, content={"error": "Image analysis not available"})
+    error, _ = _validate_upload(
+        file,
+        allowed_extensions=IMAGE_EXTENSIONS,
+        allowed_content_prefix="image",
+        media_label="image",
+    )
+    if error:
+        return JSONResponse(status_code=400, content={"error": error})
 
     path = _safe_path(file.filename)
     with open(path, "wb") as buffer:
@@ -685,6 +765,15 @@ async def analyse_audio(file: UploadFile = File(...)):
 
     Returns transcription, detection results, AND base64-encoded OGG audio.
     """
+    error, ext = _validate_upload(
+        file,
+        allowed_extensions=set(AUDIO_MIME_TYPES.keys()),
+        allowed_content_prefix="audio",
+        media_label="audio",
+    )
+    if error:
+        return JSONResponse(status_code=400, content={"error": error})
+
     path = _safe_path(file.filename)
     try:
         with open(path, "wb") as buffer:
@@ -693,7 +782,6 @@ async def analyse_audio(file: UploadFile = File(...)):
         with open(path, "rb") as f:
             audio_bytes = f.read()
 
-        ext = os.path.splitext(file.filename or "")[1].lower()
         mime_type = AUDIO_MIME_TYPES.get(ext, "audio/webm")
 
         return await _run_audio_pipeline(audio_bytes, path, mime_type)
