@@ -45,13 +45,16 @@ SEALION_MODEL = _optional("MODEL", "aisingapore/Llama-SEA-LION-v3-70B-IT")
 TRANSLATOR_MODEL = _optional("TRANSLATOR_MODEL", "aisingapore/Gemma-SEA-LION-v4-27B-IT")
 
 # ── Primary LLM: Gemini ─────────────────────────────────────────────────
-GEMINI_API_KEY = _require("GEMINI_API_KEY")
+GOOGLE_GENAI_USE_VERTEXAI = _optional_bool("GOOGLE_GENAI_USE_VERTEXAI", False)
+if GOOGLE_GENAI_USE_VERTEXAI:
+    GEMINI_API_KEY = _optional("GEMINI_API_KEY", "")
+else:
+    GEMINI_API_KEY = _require("GEMINI_API_KEY")
 GEMINI_MODEL = _optional("GEMINI_MODEL", "gemini-2.5-flash")
 GEMINI_LIVE_MODEL = _optional("GEMINI_LIVE_MODEL", "gemini-2.5-flash-native-audio-latest")
 GEMINI_LIVE_VOICE = _optional("GEMINI_LIVE_VOICE", "Aoede")
 GOOGLE_CLOUD_PROJECT = _optional("GOOGLE_CLOUD_PROJECT", "")
 GOOGLE_CLOUD_LOCATION = _optional("GOOGLE_CLOUD_LOCATION", "asia-southeast1")
-GOOGLE_GENAI_USE_VERTEXAI = _optional_bool("GOOGLE_GENAI_USE_VERTEXAI", False)
 
 # ── Fallback LLM: Groq ──────────────────────────────────────────────────
 GROQ_API_KEY = _optional("GROQ_API_KEY", "")
