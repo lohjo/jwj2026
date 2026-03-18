@@ -40,7 +40,24 @@ _SEEKABLE_FORMATS: frozenset[str] = frozenset({"mp4", "webm"})
 def _make_genai_client() -> genai.Client:
     """Create a Gemini client using Vertex AI (ADC) or API key depending on config."""
     if GOOGLE_GENAI_USE_VERTEXAI:
-        return genai.Client()
+        project = os.environ.get("GOOGLE_CLOUD_PROJECT")
+        location = os.environ.get("GOOGLE_CLOUD_LOCATION") or os.environ.get("GOOGLE_CLOUD_REGION")
+        if not project or not location:
+            logger.error(
+                "Vertex AI mode enabled (GOOGLE_GENAI_USE_VERTEXAI=True) but "
+                "GOOGLE_CLOUD_PROJECT or GOOGLE_CLOUD_LOCATION/GOOGLE_CLOUD_REGION is not set."
+            )
+            raise RuntimeError(
+                "Missing GOOGLE_CLOUD_PROJECT or GOOGLE_CLOUD_LOCATION/GOOGLE_CLOUD_REGION for Vertex AI client."
+            )
+        return genai.Client(vertexai=True, project=project, location=location)
+
+    if not GEMINI_API_KEY:
+        logger.error(
+            "GOOGLE_GENAI_USE_VERTEXAI is False but GEMINI_API_KEY is not configured."
+        )
+        raise RuntimeError("GEMINI_API_KEY must be set when not using Vertex AI.")
+
     return genai.Client(api_key=GEMINI_API_KEY)
 
 
