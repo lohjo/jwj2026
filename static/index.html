@@ -2416,7 +2416,10 @@
                 laWs.send(int16.buffer);
             };
             source.connect(processor);
-            processor.connect(laAudioContext.destination);
+            const silentGain = laAudioContext.createGain();
+            silentGain.gain.value = 0;
+            processor.connect(silentGain);
+            silentGain.connect(laAudioContext.destination);
             laWorklet = processor;
 
             laMicActive = true;
