@@ -22,7 +22,7 @@ from typing import AsyncGenerator
 from google import genai
 from google.genai import types
 
-from config import GEMINI_API_KEY, GEMINI_LIVE_MODEL, GEMINI_LIVE_VOICE
+from config import GEMINI_API_KEY, GEMINI_LIVE_MODEL, GEMINI_LIVE_VOICE, GOOGLE_GENAI_USE_VERTEXAI
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +35,14 @@ _ffmpeg_path: str | None = shutil.which("ffmpeg")
 
 # Container formats that require a seekable input — pipe:0 won't work for these.
 _SEEKABLE_FORMATS: frozenset[str] = frozenset({"mp4", "webm"})
+
+
+def _make_genai_client() -> genai.Client:
+    """Create a Gemini client using Vertex AI (ADC) or API key depending on config."""
+    if GOOGLE_GENAI_USE_VERTEXAI:
+        return genai.Client()
+    return genai.Client(api_key=GEMINI_API_KEY)
+
 
 SENTINEL_LIVE_PERSONA = """
 You are SENTINEL, an AI content detection assistant for Singapore users.
@@ -72,7 +80,7 @@ async def live_voice_exchange(
         Returns b"" on failure.
     """
     try:
-        client = genai.Client(api_key=GEMINI_API_KEY)
+        client = _make_genai_client()
 
         # Convert input audio to PCM16 mono 16kHz — the only format Live API accepts
         pcm_input = _to_pcm(audio_bytes, mime_type)
@@ -156,7 +164,7 @@ def _pcm_to_ogg(pcm_bytes: bytes, sample_rate: int = 24000) -> bytes:
                 ],
                 input=pcm_bytes,
                 capture_output=True,
-                timeout=15,
+                timeout=30,
             )
             if result.returncode == 0 and result.stdout:
                 return result.stdout
@@ -223,7 +231,7 @@ def _to_pcm(audio_bytes: bytes, mime_type: str) -> bytes:
                             "-f", "s16le", "-ar", "16000", "-ac", "1", "pipe:1",
                         ],
                         capture_output=True,
-                        timeout=15,
+                        timeout=30,
                     )
                 finally:
                     os.unlink(tmp_path)
@@ -236,7 +244,7 @@ def _to_pcm(audio_bytes: bytes, mime_type: str) -> bytes:
                     ],
                     input=audio_bytes,
                     capture_output=True,
-                    timeout=15,
+                    timeout=30,
                 )
             if result.returncode == 0 and result.stdout:
                 return result.stdout
@@ -332,7 +340,7 @@ class InterruptibleLiveSession:
 
     async def connect(self) -> None:
         """Open the WebSocket connection and start the background receiver."""
-        self._client = genai.Client(api_key=GEMINI_API_KEY)
+        self._client = _make_genai_client()
         config = _build_live_config(self._system_context)
         self._ctx = self._client.aio.live.connect(
             model=GEMINI_LIVE_MODEL, config=config

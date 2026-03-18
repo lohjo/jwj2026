@@ -16,6 +16,7 @@ from config import (
     GROQ_API_KEY,
     GROQ_MODEL,
     GROQ_API_BASE,
+    GOOGLE_GENAI_USE_VERTEXAI,
 )
 
 logger = logging.getLogger(__name__)
@@ -27,7 +28,7 @@ def _classify_gemini_error(err: Exception) -> str:
         return "api_key_invalid"
     if "permission" in message or "403" in message:
         return "permission_denied"
-    if "quota" in message or "rate" in message or "429" in message:
+    if "quota" in message or "rate" in message or "429" in message or "resource_exhausted" in message:
         return "quota_or_rate_limit"
     if "model" in message and ("not found" in message or "unsupported" in message):
         return "model_not_found"
@@ -50,9 +51,12 @@ async def call_llm(prompt: str, max_tokens: int = 1024) -> tuple[str, str]:
     """
     # ── Primary: Gemini ─────────────────────────────────────────────────
     try:
-        if not GEMINI_API_KEY or GEMINI_API_KEY.lower().startswith("your_"):
-            raise ValueError("GEMINI_API_KEY missing or placeholder")
-        client = genai.Client(api_key=GEMINI_API_KEY)
+        if GOOGLE_GENAI_USE_VERTEXAI:
+            client = genai.Client()
+        else:
+            if not GEMINI_API_KEY or GEMINI_API_KEY.lower().startswith("your_"):
+                raise ValueError("GEMINI_API_KEY missing or placeholder")
+            client = genai.Client(api_key=GEMINI_API_KEY)
         response = await asyncio.to_thread(
             client.models.generate_content,
             model=GEMINI_MODEL,

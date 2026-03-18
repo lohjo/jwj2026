@@ -30,6 +30,10 @@ def _optional(key: str, default: str = "") -> str:
     return os.getenv(key, default)
 
 
+def _optional_bool(key: str, default: bool = False) -> bool:
+    return os.getenv(key, str(default)).upper() in ("1", "TRUE", "YES")
+
+
 # ── Telegram ────────────────────────────────────────────────────────────
 TELEGRAM_TOKEN = _require("TELEGRAM_TOKEN")
 
@@ -47,6 +51,7 @@ GEMINI_LIVE_MODEL = _optional("GEMINI_LIVE_MODEL", "gemini-2.5-flash-native-audi
 GEMINI_LIVE_VOICE = _optional("GEMINI_LIVE_VOICE", "Aoede")
 GOOGLE_CLOUD_PROJECT = _optional("GOOGLE_CLOUD_PROJECT", "")
 GOOGLE_CLOUD_LOCATION = _optional("GOOGLE_CLOUD_LOCATION", "asia-southeast1")
+GOOGLE_GENAI_USE_VERTEXAI = _optional_bool("GOOGLE_GENAI_USE_VERTEXAI", False)
 
 # ── Fallback LLM: Groq ──────────────────────────────────────────────────
 GROQ_API_KEY = _optional("GROQ_API_KEY", "")
