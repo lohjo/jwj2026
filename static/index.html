@@ -2406,11 +2406,37 @@
             const processor = laAudioContext.createScriptProcessor(4096, 1, 1);
             processor.onaudioprocess = (e) => {
                 if (!laMicActive || !laWs || laWs.readyState !== WebSocket.OPEN) return;
+                const inputSampleRate = laAudioContext && laAudioContext.sampleRate ? laAudioContext.sampleRate : 16000;
                 const float32 = e.inputBuffer.getChannelData(0);
-                // Convert Float32 → Int16 PCM
-                const int16 = new Int16Array(float32.length);
-                for (let i = 0; i < float32.length; i++) {
-                    int16[i] = Math.max(-32768, Math.min(32767, Math.round(float32[i] * 32767)));
+
+                let pcmSource = float32;
+
+                // If the AudioContext sample rate is not 16kHz, resample to 16kHz before sending
+                if (inputSampleRate !== 16000) {
+                    const targetSampleRate = 16000;
+                    const sampleRateRatio = inputSampleRate / targetSampleRate;
+                    const targetLength = Math.round(float32.length / sampleRateRatio);
+                    const resampled = new Float32Array(targetLength);
+
+                    for (let i = 0; i < targetLength; i++) {
+                        const sourceIndex = i * sampleRateRatio;
+                        const indexInt = Math.floor(sourceIndex);
+                        const indexFrac = sourceIndex - indexInt;
+
+                        const s0 = float32[indexInt] || 0;
+                        const s1 = float32[Math.min(indexInt + 1, float32.length - 1)] || 0;
+
+                        resampled[i] = s0 + (s1 - s0) * indexFrac;
+                    }
+
+                    pcmSource = resampled;
+                }
+
+                // Convert Float32 → Int16 PCM (at 16kHz)
+                const int16 = new Int16Array(pcmSource.length);
+                for (let i = 0; i < pcmSource.length; i++) {
+                    const s = pcmSource[i];
+                    int16[i] = Math.max(-32768, Math.min(32767, Math.round(s * 32767)));
                 }
                 // Send raw PCM16 as binary WebSocket message
                 laWs.send(int16.buffer);
