@@ -2396,16 +2396,28 @@
                 });
             }
 
-            // Use MediaRecorder to capture WebM chunks and send via WebSocket
-            laMediaRecorder = new MediaRecorder(laMediaStream, { mimeType: 'audio/webm;codecs=opus' });
-            laMediaRecorder.ondataavailable = async (e) => {
-                if (e.data.size > 0 && laWs && laConnected) {
-                    const buf = await e.data.arrayBuffer();
-                    const base64 = btoa(String.fromCharCode(...new Uint8Array(buf)));
-                    laWs.send(JSON.stringify({ type: 'webm_audio', content: base64 }));
+            // Use ScriptProcessorNode to capture raw PCM16 16kHz audio and send as
+            // binary WebSocket frames — each 500ms MediaRecorder WebM chunk is not
+            // independently decodable, so we go direct PCM instead.
+            if (!laAudioContext) {
+                laAudioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+            }
+            const source = laAudioContext.createMediaStreamSource(laMediaStream);
+            const processor = laAudioContext.createScriptProcessor(4096, 1, 1);
+            processor.onaudioprocess = (e) => {
+                if (!laMicActive || !laWs || laWs.readyState !== WebSocket.OPEN) return;
+                const float32 = e.inputBuffer.getChannelData(0);
+                // Convert Float32 → Int16 PCM
+                const int16 = new Int16Array(float32.length);
+                for (let i = 0; i < float32.length; i++) {
+                    int16[i] = Math.max(-32768, Math.min(32767, Math.round(float32[i] * 32767)));
                 }
+                // Send raw PCM16 as binary WebSocket message
+                laWs.send(int16.buffer);
             };
-            laMediaRecorder.start(500); // 500ms chunks — continuous streaming
+            source.connect(processor);
+            processor.connect(laAudioContext.destination);
+            laWorklet = processor;
 
             laMicActive = true;
             const micBtn = document.getElementById('la-mic-btn');
@@ -2422,11 +2434,15 @@
     }
 
     function laMuteMic() {
-        if (laMediaRecorder && laMediaRecorder.state === 'recording') {
-            laMediaRecorder.stop();
-        }
-        laMediaRecorder = null;
         laMicActive = false;
+        if (laWorklet) {
+            laWorklet.disconnect();
+            laWorklet = null;
+        }
+        // Signal end of user turn so the model responds
+        if (laWs && laConnected && laWs.readyState === WebSocket.OPEN) {
+            laWs.send(JSON.stringify({ type: 'end_turn' }));
+        }
         // Keep the stream open so we can resume quickly
         const micBtn = document.getElementById('la-mic-btn');
         micBtn.style.background = 'var(--paper)';
@@ -2438,15 +2454,20 @@
     }
 
     function laStopMic() {
-        if (laMediaRecorder && laMediaRecorder.state === 'recording') {
-            laMediaRecorder.stop();
+        laMicActive = false;
+        if (laWorklet) {
+            laWorklet.disconnect();
+            laWorklet = null;
+        }
+        if (laAudioContext) {
+            laAudioContext.close().catch(() => {});
+            laAudioContext = null;
         }
         if (laMediaStream) {
             laMediaStream.getTracks().forEach(t => t.stop());
             laMediaStream = null;
         }
         laMediaRecorder = null;
-        laMicActive = false;
         const micBtn = document.getElementById('la-mic-btn');
         micBtn.style.background = 'var(--paper)';
         micBtn.style.color = '';
