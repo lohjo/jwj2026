@@ -2217,6 +2217,7 @@
     let laPlaybackCtx = null;
     let laPlaybackQueue = [];
     let laPlaying = false;
+    let laPlaybackTime = 0;
     let laMediaRecorder = null;
 
     function laSetStatus(text, color) {
@@ -2270,9 +2271,26 @@
         }
     }
 
-    function laConnect() {
+    async function laEnsurePlaybackContext() {
+        if (!laPlaybackCtx) {
+            laPlaybackCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 24000 });
+            laPlaybackTime = 0;
+        }
+        if (laPlaybackCtx.state === 'suspended') {
+            try {
+                await laPlaybackCtx.resume();
+            } catch (_) {}
+        }
+        return laPlaybackCtx;
+    }
+
+    async function laConnect() {
         const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
         laWs = new WebSocket(`${protocol}//${location.host}/ws/live-agent`);
+
+        // Prime output audio in direct response to user click to satisfy
+        // browser autoplay policies for streamed model audio.
+        await laEnsurePlaybackContext();
 
         laSetStatus('Connecting…', 'var(--amber)');
         const btn = document.getElementById('la-connect-btn');
@@ -2506,11 +2524,11 @@
         if (laConnected) laSetStatus('Connected — ready', 'var(--green)');
     }
 
-    // Audio playback — queue PCM chunks and play sequentially
-    function laPlayAudioChunk(base64Data) {
-        if (!laPlaybackCtx) {
-            laPlaybackCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 24000 });
-        }
+    // Audio playback — decode PCM16 chunks and schedule them continuously
+    async function laPlayAudioChunk(base64Data) {
+        const ctx = await laEnsurePlaybackContext();
+        if (!ctx) return;
+
         const raw = atob(base64Data);
         const bytes = new Uint8Array(raw.length);
         for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
@@ -2522,8 +2540,25 @@
             samples[i] = view.getInt16(i * 2, true) / 32768;
         }
 
-        laPlaybackQueue.push(samples);
-        if (!laPlaying) laPlayNextChunk();
+        if (!samples.length) return;
+
+        const buffer = ctx.createBuffer(1, samples.length, 24000);
+        buffer.getChannelData(0).set(samples);
+        const source = ctx.createBufferSource();
+        source.buffer = buffer;
+        source.connect(ctx.destination);
+
+        const now = ctx.currentTime;
+        const startAt = Math.max(now + 0.01, laPlaybackTime || now + 0.01);
+        source.start(startAt);
+        laPlaybackTime = startAt + buffer.duration;
+
+        laPlaying = true;
+        source.onended = () => {
+            if (ctx.currentTime >= laPlaybackTime - 0.02) {
+                laPlaying = false;
+            }
+        };
     }
 
     function laPlayNextChunk() {
@@ -2542,6 +2577,7 @@
     function laStopPlayback() {
         laPlaybackQueue = [];
         laPlaying = false;
+        laPlaybackTime = 0;
         if (laPlaybackCtx) {
             laPlaybackCtx.close().catch(() => {});
             laPlaybackCtx = null;
