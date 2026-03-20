@@ -4,8 +4,8 @@ This document summarizes the key optimizations applied across the project to imp
 
 ## 1) Latency Optimizations
 
-- **Replaced multi-step voice pipeline with Gemini Live API**  
-  Switched from separate STT → LLM → TTS calls to a single bidirectional Live API session for spoken verdicts, reducing round trips and improving response time for audio interactions.
+- **Gemini Live API for spoken verdicts and bidirectional audio**  
+  On audio flows, we still use Deepgram STT and the existing detection pipeline on the transcript, but now route the final verdict into a bidirectional Gemini Live API session for spoken responses, reducing round trips and improving response time for audio interactions.
 
 - **Parallelized core detection tasks**  
   Detection stages (GUARD, misinformation checks, and manipulation analysis where applicable) run in parallel where possible instead of strictly sequential execution.
