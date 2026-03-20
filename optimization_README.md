@@ -1,6 +1,6 @@
 # SENTINEL Optimization Summary
 
-This document summarises the key optimizations applied across the project to improve speed, reliability, and user experience.
+This document summarizes the key optimizations applied across the project to improve speed, reliability, and user experience.
 
 ## 1) Latency Optimizations
 
@@ -11,7 +11,7 @@ This document summarises the key optimizations applied across the project to imp
   Detection stages (GUARD, misinformation checks, and manipulation analysis where applicable) run in parallel where possible instead of strictly sequential execution.
 
 - **Streaming-first UX with SSE**  
-  Added/used Server-Sent Events for progressive updates in the web dashboard, so users see pipeline progress immediately rather than waiting for one final blocking response.
+  Added/used Server-Sent Events for progressive updates in the interface flow, so users see pipeline progress immediately rather than waiting for one final blocking response.
 
 ## 2) Reliability & Availability Optimizations
 
@@ -29,8 +29,8 @@ This document summarises the key optimizations applied across the project to imp
 - **Research cache layer**  
   Added a similarity/cache layer in the research path to reduce repeated processing for near-duplicate requests.
 
-- **Vector retrieval with ClickHouse**  
-  Uses vector search for context retrieval in prediction/research flows, improving relevance while reducing repeated broad searches.
+- **ClickHouse-backed retrieval and telemetry**  
+  Uses ClickHouse in research/prediction-support workflows and logging, improving reuse of prior context while reducing repeated broad searches.
 
 - **Async-first execution model**  
   Keeps handlers responsive by offloading blocking work and preserving non-blocking execution in request/handler paths.
@@ -47,9 +47,9 @@ These optimizations collectively improve:
 ## 5) How to Verify
 
 - Run tests:
-  - `python -m pytest tests/ -v`
+  - `.venv\Scripts\python.exe -m pytest tests/ -v`
 - Validate deployment readiness:
-  - `python verify_hackathon.py`
+  - `.venv\Scripts\python.exe verify_hackathon.py`
 - Manually test:
-  - Text/image/audio analysis flows in web UI and Telegram
-  - Failure-path behavior (provider fallback) and SSE progress rendering
+  - Text/image/audio analysis flows in primary user interfaces
+  - Failure-path behavior (provider fallback) and streaming progress rendering
