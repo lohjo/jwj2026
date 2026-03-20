@@ -1,4 +1,4 @@
-# SENTINEL Optimization Summary
+# OPTIMIZATION — SENTINEL Optimization Summary
 
 This document summarizes the key optimizations applied across the project to improve speed, reliability, and user experience.
 
