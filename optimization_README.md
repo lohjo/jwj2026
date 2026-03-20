@@ -47,9 +47,9 @@ These optimizations collectively improve:
 ## 5) How to Verify
 
 - Run tests:
-  - `.venv\Scripts\python.exe -m pytest tests/ -v`
+  - `python -m pytest tests/ -v`
 - Validate deployment readiness:
-  - `.venv\Scripts\python.exe verify_hackathon.py`
+  - `python verify_hackathon.py`
 - Manually test:
   - Text/image/audio analysis flows in primary user interfaces
   - Failure-path behavior (provider fallback) and streaming progress rendering
