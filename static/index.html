@@ -2554,7 +2554,31 @@ registerProcessor('pcm-processor', PCMProcessor);
             laSetStatus('Listening…', 'var(--green)');
             laDrawVisualizer();
         } catch (e) {
-            laSetStatus('Microphone access denied', 'var(--red)');
+            if (laWorkletNode) { laWorkletNode.port.onmessage = null; laWorkletNode.disconnect(); laWorkletNode = null; }
+            if (laSilentGainNode) { laSilentGainNode.disconnect(); laSilentGainNode = null; }
+            if (laMicSourceNode) { laMicSourceNode.disconnect(); laMicSourceNode = null; }
+            if (laAnalyserNode) { laAnalyserNode.disconnect(); laAnalyserNode = null; }
+            if (laVisualizerRaf) {
+                cancelAnimationFrame(laVisualizerRaf);
+                laVisualizerRaf = null;
+            }
+            laMicActive = false;
+            const micBtn = document.getElementById('la-mic-btn');
+            micBtn.style.background = 'var(--paper)';
+            micBtn.style.color = 'var(--ink-3)';
+            micBtn.style.borderColor = 'var(--border)';
+            micBtn.textContent = '🔇';
+            micBtn.title = 'Click to unmute';
+            // Log the actual error for debugging
+            console.error('Failed to start microphone:', e);
+            // Choose a user-facing message based on error type
+            let laErrorMessage = 'Failed to start microphone';
+            if (e && (e.name === 'NotAllowedError' || e.name === 'SecurityError')) {
+                laErrorMessage = 'Microphone access denied';
+            } else if (e && (e.name === 'NotFoundError' || e.name === 'OverconstrainedError')) {
+                laErrorMessage = 'No suitable microphone found';
+            }
+            laSetStatus(laErrorMessage, 'var(--red)');
         }
     }
 
