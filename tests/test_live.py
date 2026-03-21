@@ -179,7 +179,7 @@ async def test_interrupt_unblocks_receive_audio_and_does_not_leak_subsequent_chu
     """
     ils = InterruptibleLiveSession(system_context="test")
 
-    # Inject a mock live session so interrupt() can call send_client_content
+    # Inject a non-None live session so interrupt() does not early-return when _session is None
     mock_live_session = AsyncMock()
     ils._session = mock_live_session
     ils._model_speaking = True
