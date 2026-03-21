@@ -527,10 +527,16 @@ class InterruptibleLiveSession:
                     continue
 
                 if message.server_content.model_turn:
-                    self._model_speaking = True
                     for part in message.server_content.model_turn.parts:
                         if part.inline_data:
                             if gen == self._generation:
+                                # Only mark the model as speaking and enqueue
+                                # audio for the current generation; stale
+                                # chunks from a superseded generation must not
+                                # flip _model_speaking back to True (which
+                                # would corrupt barge-in logic after an
+                                # interrupt).
+                                self._model_speaking = True
                                 await self._response_queue.put(
                                     part.inline_data.data
                                 )
@@ -543,12 +549,12 @@ class InterruptibleLiveSession:
                                 )
 
                 if message.server_content.turn_complete:
-                    self._model_speaking = False
-                    # Only emit the sentinel if no interrupt occurred while we
-                    # were waiting.  interrupt() already enqueued its own
-                    # sentinel, so emitting another would cause the next
-                    # receive_audio() call to return immediately with no audio.
+                    # Only clear the flag and emit the sentinel for the
+                    # current generation.  A stale turn_complete from a
+                    # superseded generation must not prematurely clear
+                    # _model_speaking for an in-progress new generation.
                     if gen == self._generation:
+                        self._model_speaking = False
                         await self._response_queue.put(None)
         except Exception as e:
             if not self._closed:
