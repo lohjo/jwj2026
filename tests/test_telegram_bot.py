@@ -1292,6 +1292,26 @@ class TestStartBot:
             stop_signals=None,
         )
 
+    def test_background_start_skips_polling_when_webhook_enabled(self):
+        from telegram_bot import start_bot_background
+
+        with patch("telegram_bot.TELEGRAM_TOKEN", "fake-token"), \
+             patch("telegram_bot.TELEGRAM_WEBHOOK_ENABLED", True), \
+             patch("telegram_bot._build_app") as mock_build_app, \
+             patch("telegram_bot.threading.Thread") as mock_thread:
+            start_bot_background()
+
+        mock_build_app.assert_not_called()
+        mock_thread.assert_not_called()
+
+    def test_start_bot_exits_when_webhook_enabled(self):
+        from telegram_bot import start_bot
+
+        with patch("telegram_bot.TELEGRAM_TOKEN", "fake-token"), \
+             patch("telegram_bot.TELEGRAM_WEBHOOK_ENABLED", True):
+            with pytest.raises(SystemExit):
+                start_bot()
+
 
 # ═══════════════════════════════════════════════════════════════════════
 # SECTION 12 — PARSE MODE COMPLIANCE

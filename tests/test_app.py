@@ -17,12 +17,34 @@ from unittest.mock import AsyncMock, patch, MagicMock
 import pytest
 from fastapi.testclient import TestClient
 
-from app import app
+from app import app, lifespan
 
 
 @pytest.fixture
 def client():
     return TestClient(app)
+
+
+@pytest.mark.asyncio
+async def test_lifespan_does_not_start_telegram_poller_by_default():
+    """FastAPI lifespan should not start Telegram polling unless explicitly enabled."""
+    with patch("app.TELEGRAM_BACKGROUND_POLLER_ENABLED", False), \
+         patch("app.TELEGRAM_WEBHOOK_ENABLED", False), \
+         patch("telegram_bot.start_bot_background") as mock_start:
+        async with lifespan(app):
+            pass
+    mock_start.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_lifespan_starts_telegram_poller_when_enabled():
+    """FastAPI lifespan starts Telegram polling only when poller mode is enabled."""
+    with patch("app.TELEGRAM_BACKGROUND_POLLER_ENABLED", True), \
+         patch("app.TELEGRAM_WEBHOOK_ENABLED", False), \
+         patch("telegram_bot.start_bot_background") as mock_start:
+        async with lifespan(app):
+            pass
+    mock_start.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
@@ -35,6 +57,80 @@ def test_health_endpoint(client):
     assert res.status_code == 200
     data = res.json()
     assert data["status"] == "healthy"
+
+
+def test_telegram_health_endpoint_reports_runtime_state(client):
+    """Telegram health endpoint exposes webhook readiness and mode flags."""
+    with patch("app.TELEGRAM_WEBHOOK_ENABLED", True), \
+         patch("app.TELEGRAM_BACKGROUND_POLLER_ENABLED", False), \
+         patch("app.TELEGRAM_WEBHOOK_PATH", "/telegram/webhook"), \
+         patch("app.TELEGRAM_WEBHOOK_SECRET", "secret"), \
+         patch("telegram_bot.get_telegram_runtime_status", return_value={
+             "webhook_ready": True,
+             "webhook_running": True,
+         }):
+        res = client.get("/health/telegram")
+
+    assert res.status_code == 200
+    data = res.json()
+    assert data["webhook_enabled"] is True
+    assert data["background_poller_enabled"] is False
+    assert data["webhook_path"] == "/telegram/webhook"
+    assert data["webhook_secret_configured"] is True
+    assert data["webhook_ready"] is True
+    assert data["webhook_running"] is True
+
+
+def test_telegram_health_endpoint_handles_runtime_errors(client):
+    """Telegram health endpoint remains available if runtime probing fails."""
+    with patch("app.TELEGRAM_WEBHOOK_ENABLED", True), \
+         patch("telegram_bot.get_telegram_runtime_status", side_effect=RuntimeError("boom")):
+        res = client.get("/health/telegram")
+
+    assert res.status_code == 200
+    data = res.json()
+    assert data["webhook_enabled"] is True
+    assert data["webhook_ready"] is False
+    assert data["webhook_running"] is False
+    assert "error" in data
+
+
+def test_telegram_webhook_returns_404_when_disabled(client):
+    """Webhook endpoint should be unavailable when webhook mode is disabled."""
+    with patch("app.TELEGRAM_WEBHOOK_ENABLED", False):
+        res = client.post("/telegram/webhook", json={"update_id": 1})
+    assert res.status_code == 404
+
+
+def test_telegram_webhook_rejects_invalid_secret(client):
+    """Webhook endpoint rejects requests with invalid Telegram secret header."""
+    with patch("app.TELEGRAM_WEBHOOK_ENABLED", True), \
+         patch("app.TELEGRAM_WEBHOOK_SECRET", "expected-secret"), \
+         patch("telegram_bot.process_webhook_update", new_callable=AsyncMock) as mock_process:
+        res = client.post(
+            "/telegram/webhook",
+            json={"update_id": 1},
+            headers={"X-Telegram-Bot-Api-Secret-Token": "wrong-secret"},
+        )
+
+    assert res.status_code == 403
+    mock_process.assert_not_called()
+
+
+def test_telegram_webhook_processes_update_when_enabled(client):
+    """Webhook endpoint forwards update payload to Telegram PTB processor."""
+    with patch("app.TELEGRAM_WEBHOOK_ENABLED", True), \
+         patch("app.TELEGRAM_WEBHOOK_SECRET", "expected-secret"), \
+         patch("telegram_bot.process_webhook_update", new_callable=AsyncMock, return_value=True) as mock_process:
+        res = client.post(
+            "/telegram/webhook",
+            json={"update_id": 1, "message": {"text": "hi"}},
+            headers={"X-Telegram-Bot-Api-Secret-Token": "expected-secret"},
+        )
+
+    assert res.status_code == 200
+    assert res.json().get("ok") is True
+    mock_process.assert_called_once()
 
 
 def test_root_serves_html(client):

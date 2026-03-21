@@ -243,6 +243,13 @@ ELEVENLABS_API_KEY=          # TTS fallback
 FIRECRAWL_API_KEY=           # Web research + source retrieval
 CLICKHOUSE_HOST=             # Telemetry + RAG
 CLICKHOUSE_PASSWORD=
+
+# Telegram on Cloud Run (webhook mode, no polling)
+TELEGRAM_WEBHOOK_ENABLED=true
+TELEGRAM_WEBHOOK_PATH=/telegram/webhook
+TELEGRAM_WEBHOOK_URL=https://<your-cloud-run-url>/telegram/webhook
+TELEGRAM_WEBHOOK_SECRET=<random-long-secret>
+TELEGRAM_BACKGROUND_POLLER_ENABLED=false
 ```
 
 Full variable list: see [TECHNICAL_DETAILS.md](TECHNICAL_DETAILS.md#environment-variables).
