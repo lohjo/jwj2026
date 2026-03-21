@@ -267,6 +267,16 @@ Open [http://localhost:8080](http://localhost:8080) to access the dashboard.
 python -m pytest tests/ -v
 ```
 
+### Run Live API Smoke Check (real runtime path)
+
+```bash
+# Executes media.live.live_voice_exchange() with a local OGG fixture
+python verify_live_api.py
+```
+
+This is a non-test runtime check for Gemini Live API (real network call), useful when
+you need to verify live audio output instead of mocked unit tests.
+
 ---
 
 ## Telegram Commands
