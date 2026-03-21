@@ -2456,17 +2456,54 @@
 class PCMProcessor extends AudioWorkletProcessor {
     constructor() {
         super();
-        this._targetRate = 16000;
+        this._targetRate    = 16000;
         this._targetSamples = 1600;
-        this._ratio = sampleRate / this._targetRate;
-        this._sourceBuffer = [];
+        this._ratio         = sampleRate / this._targetRate;
+
+        // Fixed-size ring buffers (power-of-2 capacities → cheap bitwise-AND modulo).
+        // Avoids Array push/splice O(n) copies and GC pressure in the audio thread.
+        this._srcCap   = 4096;
+        this._srcBuf   = new Float32Array(this._srcCap);
+        this._srcWrite = 0;
+        this._srcRead  = 0;
+        this._srcSize  = 0;
+
+        this._pcmCap   = 8192;
+        this._pcmBuf   = new Int16Array(this._pcmCap);
+        this._pcmWrite = 0;
+        this._pcmRead  = 0;
+        this._pcmSize  = 0;
+
         this._resamplePos = 0;
-        this._pcmBuffer = [];
     }
 
     _toInt16(sample) {
         const clamped = Math.max(-1, Math.min(1, sample));
         return clamped < 0 ? Math.round(clamped * 32768) : Math.round(clamped * 32767);
+    }
+
+    _srcPush(s) {
+        if (this._srcSize >= this._srcCap) return; // drop on overflow
+        this._srcBuf[this._srcWrite] = s;
+        this._srcWrite = (this._srcWrite + 1) & (this._srcCap - 1);
+        this._srcSize++;
+    }
+
+    _srcGet(offset) {
+        return this._srcBuf[(this._srcRead + offset) & (this._srcCap - 1)];
+    }
+
+    _srcConsume(n) {
+        const safe = Math.min(n, this._srcSize); // guard against underflow
+        this._srcRead = (this._srcRead + safe) & (this._srcCap - 1);
+        this._srcSize -= safe;
+    }
+
+    _pcmPush(s) {
+        if (this._pcmSize >= this._pcmCap) return; // drop on overflow
+        this._pcmBuf[this._pcmWrite] = s;
+        this._pcmWrite = (this._pcmWrite + 1) & (this._pcmCap - 1);
+        this._pcmSize++;
     }
 
     process(inputs) {
@@ -2475,34 +2512,43 @@ class PCMProcessor extends AudioWorkletProcessor {
 
         if (sampleRate === this._targetRate) {
             for (let i = 0; i < input.length; i++) {
-                this._pcmBuffer.push(this._toInt16(input[i]));
+                this._pcmPush(this._toInt16(input[i]));
             }
         } else {
             for (let i = 0; i < input.length; i++) {
-                this._sourceBuffer.push(input[i]);
+                this._srcPush(input[i]);
             }
 
-            while (this._resamplePos + 1 < this._sourceBuffer.length) {
-                const i0 = Math.floor(this._resamplePos);
-                const i1 = i0 + 1;
+            while (this._resamplePos + 1 < this._srcSize) {
+                const i0   = Math.floor(this._resamplePos);
                 const frac = this._resamplePos - i0;
-                const s0 = this._sourceBuffer[i0] || 0;
-                const s1 = this._sourceBuffer[i1] || 0;
-                const interpolated = s0 + (s1 - s0) * frac;
-                this._pcmBuffer.push(this._toInt16(interpolated));
+                const s0   = this._srcGet(i0);
+                const s1   = this._srcGet(i0 + 1);
+                this._pcmPush(this._toInt16(s0 + (s1 - s0) * frac));
                 this._resamplePos += this._ratio;
             }
 
             const consumed = Math.floor(this._resamplePos);
             if (consumed > 0) {
-                this._sourceBuffer.splice(0, consumed);
+                this._srcConsume(consumed);
                 this._resamplePos -= consumed;
             }
         }
 
-        while (this._pcmBuffer.length >= this._targetSamples) {
-            const chunk = this._pcmBuffer.splice(0, this._targetSamples);
-            this.port.postMessage(new Int16Array(chunk));
+        while (this._pcmSize >= this._targetSamples) {
+            const chunk  = new Int16Array(this._targetSamples);
+            const toEnd  = this._pcmCap - this._pcmRead;
+            if (toEnd >= this._targetSamples) {
+                // No wrap — single slice
+                chunk.set(this._pcmBuf.subarray(this._pcmRead, this._pcmRead + this._targetSamples));
+            } else {
+                // Wrap — copy tail then head
+                chunk.set(this._pcmBuf.subarray(this._pcmRead, this._pcmCap));
+                chunk.set(this._pcmBuf.subarray(0, this._targetSamples - toEnd), toEnd);
+            }
+            this._pcmRead  = (this._pcmRead + this._targetSamples) & (this._pcmCap - 1);
+            this._pcmSize -= this._targetSamples;
+            this.port.postMessage(chunk, [chunk.buffer]);
         }
 
         return true;
