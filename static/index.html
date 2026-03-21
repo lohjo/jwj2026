@@ -2436,6 +2436,18 @@
 
             if (!laAudioContext.audioWorklet) {
                 laSetStatus('AudioWorklet not supported in this browser', 'var(--red)');
+                if (laMediaStream) {
+                    try {
+                        laMediaStream.getTracks().forEach(track => track.stop());
+                    } catch (_) {}
+                    laMediaStream = null;
+                }
+                if (laAudioContext && laAudioContext.state !== 'closed') {
+                    try {
+                        laAudioContext.close();
+                    } catch (_) {}
+                }
+                laAudioContext = null;
                 return;
             }
 
