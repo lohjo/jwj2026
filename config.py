@@ -82,6 +82,7 @@ RESEARCH_DIR = Path(_optional("RESEARCH_DIR", "research"))
 
 # ── Rate limiting ────────────────────────────────────────────────────────
 COOLDOWN_SECONDS = float(_optional("COOLDOWN_SECONDS", "3.0"))
+LIVE_API_TIMEOUT_SECONDS = float(_optional("LIVE_API_TIMEOUT_SECONDS", "20.0"))
 
 # ── Cloud Run ────────────────────────────────────────────────────────────
 HEALTH_PORT = int(_optional("PORT", "8080"))

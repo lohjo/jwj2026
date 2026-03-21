@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, Coroutine
 
 from telegram import Update
+from telegram.error import TelegramError
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
@@ -22,7 +23,7 @@ from telegram.ext import (
     filters,
 )
 
-from config import TELEGRAM_TOKEN, COOLDOWN_SECONDS, HEALTH_PORT
+from config import TELEGRAM_TOKEN, COOLDOWN_SECONDS, HEALTH_PORT, LIVE_API_TIMEOUT_SECONDS
 from pipeline.translator import detect_language, translate_to_english, translate_from_english
 from pipeline.guard import run_guard_detection
 from pipeline.detector import detect_misinformation, run_full_detection
@@ -557,13 +558,33 @@ async def handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
         # Step 8: Voice reply — try Gemini Live API first, fall back to ElevenLabs
         try:
+            try:
+                await context.bot.send_chat_action(
+                    chat_id=update.effective_chat.id, action="record_voice"
+                )
+            except TelegramError as e:
+                logger.info("[Audio] record_voice chat action skipped: %s", e)
+            except Exception:
+                pass
+
             with open(audio_path, "rb") as f:
                 raw_audio = f.read()
-            live_ogg = await live.live_voice_exchange(
-                audio_bytes=raw_audio,
-                mime_type="audio/ogg" if ext == ".ogg" else "audio/mpeg",
-                system_context=explanation,
-            )
+            live_ogg = b""
+            if live is not None:
+                try:
+                    live_ogg = await asyncio.wait_for(
+                        live.live_voice_exchange(
+                            audio_bytes=raw_audio,
+                            mime_type="audio/ogg" if ext == ".ogg" else "audio/mpeg",
+                            system_context=explanation,
+                        ),
+                        timeout=LIVE_API_TIMEOUT_SECONDS,
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        "[Audio] Live API voice reply timed out for user_id=%s",
+                        user_id,
+                    )
             if live_ogg:
                 tts_path = f"downloads/live_{audio.file_id}.ogg"
                 with open(tts_path, "wb") as f:

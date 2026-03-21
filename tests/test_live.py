@@ -4,13 +4,14 @@ tests/test_live.py — Unit tests for media/live.py (Gemini Live API).
 All external API calls are mocked — no real WebSockets are opened.
 """
 
+import asyncio
 import io
 import shutil
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from media.live import live_voice_exchange, _pcm_to_ogg
+from media.live import InterruptibleLiveSession, live_voice_exchange, _pcm_to_ogg
 
 
 # ---------------------------------------------------------------------------
@@ -163,3 +164,566 @@ def test_pcm_to_ogg_returns_empty_bytes_on_pydub_error():
          patch("media.live.io.BytesIO", side_effect=Exception("pydub error")):
         result = _pcm_to_ogg(b"\x00\x01" * 100)
     assert result == b""
+
+
+# ---------------------------------------------------------------------------
+# InterruptibleLiveSession.interrupt() — focused unit tests
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_interrupt_unblocks_receive_audio_and_does_not_leak_subsequent_chunks():
+    """interrupt() must:
+    - unblock a receive_audio() call that is waiting for more data
+    - return only the chunks that were enqueued before the interrupt sentinel
+    - not yield any chunk enqueued after interrupt() is called
+    """
+    ils = InterruptibleLiveSession(system_context="test")
+
+    # Inject a non-None live session so interrupt() does not early-return when _session is None
+    mock_live_session = AsyncMock()
+    ils._session = mock_live_session
+    ils._model_speaking = True
+
+    # Pre-interrupt audio chunks
+    chunk_before_1 = b"\x10\x11" * 100
+    chunk_before_2 = b"\x20\x21" * 100
+    # Post-interrupt audio chunk — must never appear in the output
+    chunk_after = b"\x30\x31" * 100
+
+    # Enqueue the two pre-interrupt chunks as if the model was already speaking
+    await ils._response_queue.put(chunk_before_1)
+    await ils._response_queue.put(chunk_before_2)
+
+    received: list[bytes] = []
+    pre_interrupt_drained = asyncio.Event()
+
+    async def _collect() -> None:
+        async for chunk in ils.receive_audio():
+            received.append(chunk)
+            # Once both pre-interrupt chunks have been consumed, signal the test
+            if len(received) == 2:
+                pre_interrupt_drained.set()
+
+    # Start draining the queue in the background
+    collect_task = asyncio.create_task(_collect())
+
+    try:
+        # Wait deterministically until both pre-interrupt chunks have been
+        # consumed so we can be sure the consumer is now blocked waiting for
+        # the next item before we call interrupt().
+        await asyncio.wait_for(pre_interrupt_drained.wait(), timeout=1.0)
+
+        # Interrupt — this sets _model_speaking=False and enqueues None
+        await ils.interrupt()
+
+        # Enqueue a chunk that arrives after the interrupt; it must not be yielded
+        await ils._response_queue.put(chunk_after)
+
+        await asyncio.wait_for(collect_task, timeout=2.0)
+
+        # We must receive exactly the two pre-interrupt chunks, in order, and nothing else.
+        assert received == [chunk_before_1, chunk_before_2], (
+            "receive_audio() must yield exactly the two pre-interrupt chunks in order"
+        )
+        assert not ils.is_model_speaking, "_model_speaking should be False after interrupt"
+    finally:
+        if not collect_task.done():
+            collect_task.cancel()
+            try:
+                await collect_task
+            except asyncio.CancelledError:
+                pass
+
+
+@pytest.mark.asyncio
+async def test_interrupt_sets_model_speaking_false():
+    """interrupt() must clear the is_model_speaking flag."""
+    ils = InterruptibleLiveSession(system_context="test")
+    mock_live_session = AsyncMock()
+    ils._session = mock_live_session
+    ils._model_speaking = True
+
+    await ils.interrupt()
+
+    assert not ils.is_model_speaking
+
+
+@pytest.mark.asyncio
+async def test_interrupt_while_session_closed_is_a_noop():
+    """interrupt() on a closed session must not raise and must not enqueue anything."""
+    ils = InterruptibleLiveSession(system_context="test")
+    ils._closed = True
+    mock_live_session = AsyncMock()
+    ils._session = mock_live_session
+
+    await ils.interrupt()  # must not raise
+
+    assert ils._response_queue.empty()
+    mock_live_session.send_client_content.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_send_audio_auto_interrupts_when_model_speaking():
+    """send_audio() should perform automatic barge-in when model is speaking."""
+    ils = InterruptibleLiveSession(system_context="test")
+    mock_live_session = AsyncMock()
+    ils._session = mock_live_session
+    ils._model_speaking = True
+
+    with patch.object(ils, "interrupt", new=AsyncMock()) as mock_interrupt:
+        await ils.send_audio(b"\x01\x02" * 100)
+
+    mock_interrupt.assert_awaited_once()
+    mock_live_session.send_realtime_input.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_send_audio_does_not_interrupt_when_model_not_speaking():
+    """send_audio() should not call interrupt() if model is not speaking."""
+    ils = InterruptibleLiveSession(system_context="test")
+    mock_live_session = AsyncMock()
+    ils._session = mock_live_session
+    ils._model_speaking = False
+
+    with patch.object(ils, "interrupt", new=AsyncMock()) as mock_interrupt:
+        await ils.send_audio(b"\x01\x02" * 100)
+
+    mock_interrupt.assert_not_awaited()
+    mock_live_session.send_realtime_input.assert_awaited_once()
+# InterruptibleLiveSession — interrupt() correctness
+# ---------------------------------------------------------------------------
+
+def _make_interruptible_session_mock():
+    """Return a mock genai.Client whose live.connect() is an async context manager.
+
+    The returned session's receive() method yields from a gated async iterator
+    that keeps the receive loop alive until the session is explicitly closed.
+    This avoids timing-dependent completion of the background _receive_loop()
+    during tests that assert on the response queue after interrupt().
+    """
+    mock_session = AsyncMock()
+
+    gate = asyncio.Event()
+
+    async def _receive_iter():
+        # Keep the iterator (and thus the receive loop) alive until the gate is set.
+        try:
+            await gate.wait()
+        finally:
+            # Once the gate is set, allow the iterator to complete so that the
+            # production receive loop can run its finally block.
+            return
+        # Unreachable yield to ensure this is treated as an async generator.
+        if False:  # pragma: no cover - defensive; never executed.
+            yield None
+
+    mock_session.receive = MagicMock(return_value=_receive_iter())
+
+    async def _signal_close(*args, **kwargs):
+        gate.set()
+
+    # Ensure that closing the session signals the iterator to finish.
+    mock_session.close = AsyncMock(side_effect=_signal_close)
+
+    mock_ctx = AsyncMock()
+    mock_ctx.__aenter__ = AsyncMock(return_value=mock_session)
+
+    async def _aexit(*args, **kwargs):
+        gate.set()
+        return False
+
+    mock_ctx.__aexit__ = AsyncMock(side_effect=_aexit)
+    mock_client = MagicMock()
+    mock_client.aio.live.connect.return_value = mock_ctx
+    return mock_client, mock_session
+
+
+@pytest.mark.asyncio
+async def test_interrupt_drains_queued_audio():
+    """interrupt() removes already-enqueued audio chunks from the queue."""
+    with patch("media.live._make_genai_client") as mock_factory:
+        mock_client, _ = _make_interruptible_session_mock()
+        mock_factory.return_value = mock_client
+
+        session = InterruptibleLiveSession()
+        await session.connect()
+
+        # Pre-populate the queue with three audio chunks
+        for i in range(3):
+            await session._response_queue.put(bytes([i]) * 100)
+
+        await session.interrupt()
+
+        # After interrupt() the queue should contain only the None sentinel
+        assert session._response_queue.qsize() == 1
+        sentinel = session._response_queue.get_nowait()
+        assert sentinel is None
+
+        await session.close()
+
+
+@pytest.mark.asyncio
+async def test_interrupt_increments_generation():
+    """interrupt() increments _generation to invalidate in-flight audio."""
+    with patch("media.live._make_genai_client") as mock_factory:
+        mock_client, _ = _make_interruptible_session_mock()
+        mock_factory.return_value = mock_client
+
+        session = InterruptibleLiveSession()
+        await session.connect()
+
+        assert session._generation == 0
+        await session.interrupt()
+        assert session._generation == 1
+        await session.interrupt()
+        assert session._generation == 2
+
+        await session.close()
+
+
+@pytest.mark.asyncio
+async def test_receive_loop_discards_audio_after_interrupt():
+    """Audio that arrives from the server after interrupt() is discarded.
+
+    The receive_loop captures ``gen`` before awaiting the next message.
+    We use a gate to ensure the generation is incremented *while* the loop
+    is suspended waiting for the message, so when the message finally arrives
+    ``gen != self._generation`` and the audio is discarded.
+    """
+    pcm_chunk = b"\xAB" * 200
+
+    audio_part = MagicMock()
+    audio_part.inline_data = MagicMock()
+    audio_part.inline_data.data = pcm_chunk
+
+    audio_msg = MagicMock()
+    audio_msg.server_content = MagicMock()
+    audio_msg.server_content.model_turn = MagicMock()
+    audio_msg.server_content.model_turn.parts = [audio_part]
+    audio_msg.server_content.interrupted = False
+    audio_msg.server_content.turn_complete = False
+
+    # Gate: holds back the message until after interrupt() increments generation.
+    gate = asyncio.Event()
+
+    async def gated_receive():
+        await gate.wait()  # suspends, giving the test a chance to interrupt
+        yield audio_msg
+
+    with patch("media.live._make_genai_client") as mock_factory:
+        mock_client, mock_session = _make_interruptible_session_mock()
+        mock_session.receive = MagicMock(return_value=gated_receive())
+        mock_factory.return_value = mock_client
+
+        ils = InterruptibleLiveSession()
+        await ils.connect()
+
+        # Let the receive_loop start and reach the gate (gen=0 captured).
+        await asyncio.sleep(0)
+
+        # Simulate interrupt(): advance generation while loop is suspended.
+        ils._generation += 1
+
+        # Release the gate so the audio message is delivered.
+        gate.set()
+        await asyncio.sleep(0.05)
+
+        # Queue should contain only the finally-block sentinel; no audio.
+        items = []
+        while not ils._response_queue.empty():
+            items.append(ils._response_queue.get_nowait())
+
+        audio_items = [x for x in items if x is not None]
+        assert audio_items == [], (
+            "Stale audio from a superseded generation must not appear in the queue"
+        )
+
+        await ils.close()
+
+
+@pytest.mark.asyncio
+async def test_receive_loop_stale_model_turn_does_not_set_model_speaking():
+    """A stale model_turn (gen != self._generation) must NOT set _model_speaking=True.
+
+    After interrupt() the flag is False.  If a stale audio chunk arrives from
+    the superseded generation it must be discarded *and* the flag must stay
+    False, otherwise send_audio() would incorrectly call interrupt() again and
+    barge-in logic breaks.
+    """
+    pcm_chunk = b"\xAB" * 200
+
+    audio_part = MagicMock()
+    audio_part.inline_data = MagicMock()
+    audio_part.inline_data.data = pcm_chunk
+
+    audio_msg = MagicMock()
+    audio_msg.server_content = MagicMock()
+    audio_msg.server_content.model_turn = MagicMock()
+    audio_msg.server_content.model_turn.parts = [audio_part]
+    audio_msg.server_content.interrupted = False
+    audio_msg.server_content.turn_complete = False
+
+    gate = asyncio.Event()
+
+    async def gated_receive():
+        await gate.wait()
+        yield audio_msg
+
+    with patch("media.live._make_genai_client") as mock_factory:
+        mock_client, mock_session = _make_interruptible_session_mock()
+        mock_session.receive = MagicMock(return_value=gated_receive())
+        mock_factory.return_value = mock_client
+
+        ils = InterruptibleLiveSession()
+        await ils.connect()
+
+        # Receive_loop is waiting at the gate with gen=0 captured.
+        await asyncio.sleep(0)
+
+        # Simulate interrupt() — advances generation; flag is cleared.
+        ils._generation += 1
+        ils._model_speaking = False
+
+        # Release the stale audio message (gen=0, current=1 — stale).
+        gate.set()
+        await asyncio.sleep(0.05)
+
+        assert not ils.is_model_speaking, (
+            "_model_speaking must remain False after a stale model_turn "
+            "from a superseded generation"
+        )
+
+        await ils.close()
+
+
+@pytest.mark.asyncio
+async def test_receive_loop_stale_turn_complete_does_not_clear_model_speaking():
+    """A stale turn_complete (gen != self._generation) must NOT clear _model_speaking.
+
+    If a new generation is already in progress (_model_speaking=True), a
+    turn_complete arriving from the previous generation must not prematurely
+    set _model_speaking=False.
+    """
+    end_msg = MagicMock()
+    end_msg.server_content = MagicMock()
+    end_msg.server_content.model_turn = None
+    end_msg.server_content.interrupted = False
+    end_msg.server_content.turn_complete = True
+
+    # gate_open: release the stale turn_complete message
+    # hold_open: keep the generator alive so finally block doesn't run
+    gate_open = asyncio.Event()
+    hold_open = asyncio.Event()
+
+    async def gated_receive():
+        await gate_open.wait()  # suspends so we can bump _generation first
+        yield end_msg
+        await hold_open.wait()  # keep loop alive so finally block doesn't run
+
+    with patch("media.live._make_genai_client") as mock_factory:
+        mock_client, mock_session = _make_interruptible_session_mock()
+        mock_session.receive = MagicMock(return_value=gated_receive())
+        mock_factory.return_value = mock_client
+
+        ils = InterruptibleLiveSession()
+        await ils.connect()
+
+        # Let the receive_loop start and block at the gate (gen=0 captured).
+        await asyncio.sleep(0)
+
+        # Simulate: interrupt fired, new generation started and is speaking.
+        ils._generation += 1
+        ils._model_speaking = True
+
+        # Release the stale turn_complete from the old generation.
+        gate_open.set()
+        await asyncio.sleep(0.05)
+
+        assert ils.is_model_speaking, (
+            "_model_speaking must remain True when a stale turn_complete "
+            "arrives from a superseded generation while a new generation is "
+            "still in progress"
+        )
+
+        hold_open.set()
+        await ils.close()
+
+
+@pytest.mark.asyncio
+async def test_receive_loop_omits_turn_complete_sentinel_after_interrupt():
+    """turn_complete does not add a duplicate sentinel when generation changed.
+
+    interrupt() enqueues its own sentinel; the receive_loop must not also
+    enqueue one for the stale turn_complete, or the next receive_audio()
+    call would terminate immediately without yielding any audio.
+    """
+    end_msg = MagicMock()
+    end_msg.server_content = MagicMock()
+    end_msg.server_content.model_turn = None
+    end_msg.server_content.interrupted = False
+    end_msg.server_content.turn_complete = True
+
+    gate = asyncio.Event()
+
+    async def gated_receive():
+        await gate.wait()
+        yield end_msg
+
+    with patch("media.live._make_genai_client") as mock_factory:
+        mock_client, mock_session = _make_interruptible_session_mock()
+        mock_session.receive = MagicMock(return_value=gated_receive())
+        mock_factory.return_value = mock_client
+
+        ils = InterruptibleLiveSession()
+        await ils.connect()
+
+        # Let the receive_loop start and block at the gate (gen=0 captured).
+        await asyncio.sleep(0)
+
+        # Simulate interrupt(): advance generation and enqueue its sentinel.
+        ils._generation += 1
+        await ils._response_queue.put(None)  # interrupt()'s sentinel
+
+        # Release the stale turn_complete message.
+        gate.set()
+        await asyncio.sleep(0.05)
+
+        # Collect everything in the queue (including the finally sentinel).
+        sentinels = []
+        while not ils._response_queue.empty():
+            sentinels.append(ils._response_queue.get_nowait())
+
+        none_count = sum(1 for x in sentinels if x is None)
+        # Expected: 1 from interrupt() + 1 from finally = exactly 2.
+        # The stale turn_complete must NOT add a third.
+        assert none_count == 2, (
+            f"Expected exactly 2 None sentinels (interrupt + finally) but got {none_count}"
+        )
+
+        await ils.close()
+
+
+@pytest.mark.asyncio
+async def test_receive_loop_stale_audio_does_not_set_model_speaking():
+    """Stale audio chunks (gen != current generation) must NOT set _model_speaking.
+
+    After interrupt() increments _generation, the receive_loop may still deliver
+    a model_turn message that was already in-flight.  Since that chunk is
+    discarded, _model_speaking must remain False so that auto-barge-in logic
+    and WS event selection are not confused by a flag that is stuck at True.
+    """
+    pcm_chunk = b"\xCD" * 200
+
+    audio_part = MagicMock()
+    audio_part.inline_data = MagicMock()
+    audio_part.inline_data.data = pcm_chunk
+
+    audio_msg = MagicMock()
+    audio_msg.server_content = MagicMock()
+    audio_msg.server_content.model_turn = MagicMock()
+    audio_msg.server_content.model_turn.parts = [audio_part]
+    audio_msg.server_content.interrupted = False
+    audio_msg.server_content.turn_complete = False
+
+    gate = asyncio.Event()
+
+    async def gated_receive():
+        await gate.wait()
+        yield audio_msg
+
+    with patch("media.live._make_genai_client") as mock_factory:
+        mock_client, mock_session = _make_interruptible_session_mock()
+        mock_session.receive = MagicMock(return_value=gated_receive())
+        mock_factory.return_value = mock_client
+
+        ils = InterruptibleLiveSession()
+        await ils.connect()
+
+        # Let the receive_loop start and block at the gate.
+        await asyncio.sleep(0)
+
+        # Advance generation so the pending message becomes stale.
+        ils._generation += 1
+        assert not ils.is_model_speaking, "Precondition: model should not be speaking"
+
+        # Release the stale audio message.
+        gate.set()
+        await asyncio.sleep(0.05)
+
+        # _model_speaking must still be False: stale chunks must not flip it.
+        assert not ils.is_model_speaking, (
+            "_model_speaking must not be set True by stale audio chunks"
+        )
+
+        await ils.close()
+
+
+@pytest.mark.asyncio
+async def test_receive_loop_stale_interrupted_does_not_add_extra_sentinel():
+    """A stale server_content.interrupted (gen != self._generation) must NOT
+    enqueue an additional sentinel.
+
+    Scenario:
+    - interrupt() is called, bumping _generation from 0 → 1 and placing its
+      own sentinel in the queue.
+    - The server then sends an ``interrupted`` ACK for the *old* turn.
+      Because gen==0 but self._generation==1 when the message is processed,
+      this is a stale ACK.  The receive_loop must discard it without adding
+      another sentinel — otherwise the *next* receive_audio() call would
+      terminate immediately before yielding any audio.
+    """
+    interrupted_msg = MagicMock()
+    interrupted_msg.server_content = MagicMock()
+    interrupted_msg.server_content.model_turn = None
+    interrupted_msg.server_content.interrupted = True
+    interrupted_msg.server_content.turn_complete = False
+
+    gate = asyncio.Event()
+    released = asyncio.Event()
+
+    async def gated_receive():
+        await gate.wait()
+        released.set()
+        yield interrupted_msg
+
+    with patch("media.live._make_genai_client") as mock_factory:
+        mock_client, mock_session = _make_interruptible_session_mock()
+        mock_session.receive = MagicMock(return_value=gated_receive())
+        mock_factory.return_value = mock_client
+
+        ils = InterruptibleLiveSession()
+        await ils.connect()
+
+        # Let the receive_loop start and suspend at the gate (gen=0 captured).
+        await asyncio.sleep(0)
+
+        # Simulate interrupt(): advance generation and enqueue its sentinel.
+        ils._generation += 1
+        await ils._response_queue.put(None)  # interrupt()'s own sentinel
+
+        # Release the stale interrupted ACK (gen=0, current=1 — stale).
+        gate.set()
+        await released.wait()
+        # Yield control to let the receive_loop process the message.
+        await asyncio.sleep(0)
+
+        # Collect everything currently in the queue (before the loop's finally
+        # sentinel arrives on close).
+        sentinels_before_close = []
+        while not ils._response_queue.empty():
+            sentinels_before_close.append(ils._response_queue.get_nowait())
+
+        none_count = sum(1 for x in sentinels_before_close if x is None)
+        # Expected: 1 from interrupt() + 1 from the loop's finally block = 2.
+        # The stale interrupted ACK must NOT add a third sentinel.
+        assert none_count == 2, (
+            f"Stale interrupted ACK must not enqueue a sentinel; "
+            f"expected 2 None sentinels (interrupt + finally) but got {none_count}"
+        )
+
+        # _model_speaking should be False (interrupt() clears it via the loop).
+        assert not ils.is_model_speaking, (
+            "_model_speaking must remain False after a stale interrupted ACK"
+        )
+
+        await ils.close()

@@ -9,13 +9,89 @@ import logging
 import time
 import uuid
 
-from backend.atlas.engine import SemanticAtlas
-from backend.models import MemoryNode, TrajectoryPoint
-from backend.trajectories.tracker import TrajectoryTracker
-from backend.vectorstore.base import VectorStore
-from backend.vectorstore.factory import create_vector_store
-from backend.websocket.hub import hub
+try:
+    from backend.atlas.engine import SemanticAtlas
+    from backend.models import MemoryNode, TrajectoryPoint
+    from backend.trajectories.tracker import TrajectoryTracker
+    from backend.vectorstore.base import VectorStore
+    from backend.vectorstore.factory import create_vector_store
+    from backend.websocket.hub import hub
+except ImportError:  # pragma: no cover - fallback stubs when backend package is unavailable
+    class SemanticAtlas:
+        """Fallback stub for SemanticAtlas when backend is not installed."""
 
+        def __init__(self) -> None:
+            self.initialized = False
+
+        def initialize_from_embeddings(self, embeddings) -> None:
+            raise NotImplementedError("SemanticAtlas backend is not available.")
+
+        def project(self, embedding):
+            raise NotImplementedError("SemanticAtlas backend is not available.")
+
+
+    class MemoryNode:
+        """Fallback stub for MemoryNode when backend is not installed."""
+
+        def __init__(self, *args, **kwargs) -> None:
+            # Minimal attributes referenced in this module
+            self.id = kwargs.get("id", None)
+            self.embedding = kwargs.get("embedding", None)
+            self.position_3d = kwargs.get("position_3d", None)
+
+
+    class TrajectoryPoint:
+        """Fallback stub for TrajectoryPoint when backend is not installed."""
+
+        def __init__(self, *args, **kwargs) -> None:
+            self.id = kwargs.get("id", None)
+
+
+    class TrajectoryTracker:
+        """Fallback stub for TrajectoryTracker when backend is not installed."""
+
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        async def track(self, *args, **kwargs):
+            raise NotImplementedError("TrajectoryTracker backend is not available.")
+
+
+    class VectorStore:
+        """Fallback stub for VectorStore when backend is not installed."""
+
+        async def initialize(self) -> None:
+            raise NotImplementedError("VectorStore backend is not available.")
+
+        async def get_all(self):
+            raise NotImplementedError("VectorStore backend is not available.")
+
+        async def upsert_batch(self, nodes):
+            raise NotImplementedError("VectorStore backend is not available.")
+
+        async def add(self, node):
+            raise NotImplementedError("VectorStore backend is not available.")
+
+        async def search(self, *args, **kwargs):
+            raise NotImplementedError("VectorStore backend is not available.")
+
+        async def get_recent(self, *args, **kwargs):
+            raise NotImplementedError("VectorStore backend is not available.")
+
+
+    def create_vector_store() -> VectorStore:
+        """Fallback factory for VectorStore when backend is not installed."""
+        return VectorStore()
+
+
+    class _HubStub:
+        """Fallback stub for websocket hub when backend is not installed."""
+
+        async def broadcast(self, *args, **kwargs) -> None:
+            raise NotImplementedError("Websocket hub backend is not available.")
+
+
+    hub = _HubStub()
 logger = logging.getLogger(__name__)
 
 
