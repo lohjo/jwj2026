@@ -220,9 +220,10 @@ async def test_interrupt_unblocks_receive_audio_and_does_not_leak_subsequent_chu
 
     await asyncio.wait_for(collect_task, timeout=2.0)
 
-    assert chunk_before_1 in received, "chunk_before_1 should have been received"
-    assert chunk_before_2 in received, "chunk_before_2 should have been received"
-    assert chunk_after not in received, "chunk after interrupt must not leak into output"
+    # We must receive exactly the two pre-interrupt chunks, in order, and nothing else.
+    assert received == [chunk_before_1, chunk_before_2], (
+        "receive_audio() must yield exactly the two pre-interrupt chunks in order"
+    )
     assert not ils.is_model_speaking, "_model_speaking should be False after interrupt"
 
 
