@@ -34,7 +34,8 @@ BROWSER (React 18 + React Three Fiber)
 │   └── SubtitleBar (live transcription)
 │
 ├── VOICE PIPELINE (Gemini Live API)
-│   ├── Mic → ScriptProcessorNode (16kHz) → PCM → Base64
+│   ├── Mic → AudioWorklet (PCMProcessor, 16kHz, TypedArray ring-buffer resampler)
+│   │   └── → PCM Int16 chunks (1600 samples / 100 ms) → WebSocket binary frames
 │   ├── → Gemini Live API (client-direct WebSocket)
 │   │   ├── Audio output (24kHz) → Speaker
 │   │   ├── Tool calls → REST backend
