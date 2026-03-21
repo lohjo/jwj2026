@@ -2443,6 +2443,10 @@
                 laWorkletNode.disconnect();
                 laWorkletNode = null;
             }
+            if (laSilentGainNode) {
+                laSilentGainNode.disconnect();
+                laSilentGainNode = null;
+            }
             if (laMicSourceNode) {
                 laMicSourceNode.disconnect();
                 laMicSourceNode = null;
@@ -2550,6 +2554,10 @@ registerProcessor('pcm-processor', PCMProcessor);
             laSetStatus('Listening…', 'var(--green)');
             laDrawVisualizer();
         } catch (e) {
+            if (laWorkletNode) { laWorkletNode.port.onmessage = null; laWorkletNode.disconnect(); laWorkletNode = null; }
+            if (laSilentGainNode) { laSilentGainNode.disconnect(); laSilentGainNode = null; }
+            if (laMicSourceNode) { laMicSourceNode.disconnect(); laMicSourceNode = null; }
+            if (laAnalyserNode) { laAnalyserNode.disconnect(); laAnalyserNode = null; }
             laSetStatus('Microphone access denied', 'var(--red)');
         }
     }
