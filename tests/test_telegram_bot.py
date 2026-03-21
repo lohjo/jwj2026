@@ -5,7 +5,7 @@ All external dependencies are mocked. Zero real network calls.
 
 import asyncio
 import os
-from unittest.mock import AsyncMock, MagicMock, patch, PropertyMock
+from unittest.mock import AsyncMock, MagicMock, patch, PropertyMock, mock_open
 
 import pytest
 
@@ -865,6 +865,90 @@ class TestHandleAudio:
 
             # Should not raise
             await handle_audio(update, ctx)
+
+    @pytest.mark.asyncio
+    async def test_live_voice_timeout_falls_back_to_elevenlabs(self):
+        """Live API timeout should not block fallback TTS voice reply."""
+        from telegram_bot import handle_audio
+
+        voice = MagicMock()
+        voice.file_id = "voice_live_timeout"
+        update = _make_update(voice=voice)
+
+        file_mock = MagicMock()
+        file_mock.download_to_drive = AsyncMock()
+        ctx = _make_context()
+        ctx.bot.get_file = AsyncMock(return_value=file_mock)
+
+        async def _live_timeout(*args, **kwargs):
+            raise asyncio.TimeoutError
+
+        with patch("telegram_bot.transcribe_audio", new_callable=AsyncMock) as mock_stt, \
+             patch("telegram_bot.run_full_detection", new_callable=AsyncMock) as mock_det, \
+             patch("telegram_bot.format_detection_message", return_value="<b>OK</b>"), \
+             patch("telegram_bot.live.live_voice_exchange", new_callable=AsyncMock) as mock_live, \
+             patch("telegram_bot.synthesise_speech", new_callable=AsyncMock, return_value="downloads/tts_voice_live_timeout.mp3") as mock_tts, \
+             patch("builtins.open", mock_open(read_data=b"audio-bytes"), create=True), \
+             patch("telegram_bot._schedule_log"), \
+             patch("telegram_bot.asyncio.create_task"), \
+             patch("os.makedirs"), \
+             patch("os.path.exists", return_value=False), \
+             patch("os.remove"):
+
+            mock_stt.return_value = {
+                "transcript": "Hello world test message for live timeout fallback",
+                "detected_language": "en",
+            }
+            mock_det.return_value = _full_detection_result()
+            mock_live.side_effect = _live_timeout
+
+            await handle_audio(update, ctx)
+
+            mock_tts.assert_called_once()
+            update.message.reply_voice.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_audio_handler_sets_record_voice_chat_action_before_tts(self):
+        """Audio handler should show voice-recording processing before voice reply generation."""
+        from telegram_bot import handle_audio
+
+        voice = MagicMock()
+        voice.file_id = "voice_chat_action"
+        update = _make_update(voice=voice)
+
+        file_mock = MagicMock()
+        file_mock.download_to_drive = AsyncMock()
+        ctx = _make_context()
+        ctx.bot.get_file = AsyncMock(return_value=file_mock)
+
+        with patch("telegram_bot.transcribe_audio", new_callable=AsyncMock) as mock_stt, \
+             patch("telegram_bot.run_full_detection", new_callable=AsyncMock) as mock_det, \
+             patch("telegram_bot.format_detection_message", return_value="<b>OK</b>"), \
+             patch("telegram_bot.live.live_voice_exchange", new_callable=AsyncMock, return_value=b""), \
+             patch("telegram_bot.synthesise_speech", new_callable=AsyncMock, return_value="downloads/tts_voice_chat_action.mp3"), \
+             patch("builtins.open", mock_open(read_data=b"audio-bytes"), create=True), \
+             patch("telegram_bot._schedule_log"), \
+             patch("telegram_bot.asyncio.create_task"), \
+             patch("os.makedirs"), \
+             patch("os.path.exists", return_value=False), \
+             patch("os.remove"):
+
+            mock_stt.return_value = {
+                "transcript": "Hello world test message for chat action assertion",
+                "detected_language": "en",
+            }
+            mock_det.return_value = _full_detection_result()
+
+            await handle_audio(update, ctx)
+
+            actions = [c.kwargs.get("action") for c in ctx.bot.send_chat_action.await_args_list]
+            assert "typing" in actions
+            assert "record_voice" in actions
+            typing_idx = actions.index("typing") if "typing" in actions else -1
+            record_idx = actions.index("record_voice") if "record_voice" in actions else -1
+            assert typing_idx >= 0
+            assert record_idx >= 0
+            assert record_idx > typing_idx
 
     @pytest.mark.asyncio
     async def test_audio_temp_files_cleaned_up(self):
