@@ -2558,7 +2558,16 @@ registerProcessor('pcm-processor', PCMProcessor);
             if (laSilentGainNode) { laSilentGainNode.disconnect(); laSilentGainNode = null; }
             if (laMicSourceNode) { laMicSourceNode.disconnect(); laMicSourceNode = null; }
             if (laAnalyserNode) { laAnalyserNode.disconnect(); laAnalyserNode = null; }
-            laSetStatus('Microphone access denied', 'var(--red)');
+            // Log the actual error for debugging
+            console.error('Failed to start microphone:', e);
+            // Choose a user-facing message based on error type
+            let laErrorMessage = 'Failed to start microphone';
+            if (e && (e.name === 'NotAllowedError' || e.name === 'SecurityError')) {
+                laErrorMessage = 'Microphone access denied';
+            } else if (e && (e.name === 'NotFoundError' || e.name === 'OverconstrainedError')) {
+                laErrorMessage = 'No suitable microphone found';
+            }
+            laSetStatus(laErrorMessage, 'var(--red)');
         }
     }
 
