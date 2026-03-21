@@ -263,10 +263,21 @@ async def test_interrupt_while_session_closed_is_a_noop():
 # InterruptibleLiveSession — interrupt() correctness
 # ---------------------------------------------------------------------------
 
+async def _never_ending_receive():
+    """Async generator that suspends indefinitely — simulates an open, idle WebSocket.
+
+    Keeps ``_receive_loop()`` suspended at ``await aiter.__anext__()`` until the
+    background task is cancelled by ``close()``, so queue-state assertions made
+    after ``interrupt()`` are deterministic (no race with the finally-block sentinel).
+    """
+    await asyncio.Event().wait()  # suspends until CancelledError is injected by close()
+    yield  # pragma: no cover — unreachable; required to make this an async generator
+
+
 def _make_interruptible_session_mock():
     """Return a mock genai.Client whose live.connect() is an async context manager."""
     mock_session = AsyncMock()
-    mock_session.receive = MagicMock(return_value=_async_iter([]))
+    mock_session.receive = MagicMock(return_value=_never_ending_receive())
     mock_ctx = AsyncMock()
     mock_ctx.__aenter__ = AsyncMock(return_value=mock_session)
     mock_ctx.__aexit__ = AsyncMock(return_value=False)
