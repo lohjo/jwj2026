@@ -253,8 +253,10 @@ async def test_interrupt_while_session_closed_is_a_noop():
     """interrupt() on a closed session must not raise and must not enqueue anything."""
     ils = InterruptibleLiveSession(system_context="test")
     ils._closed = True
-    ils._session = AsyncMock()
+    mock_live_session = AsyncMock()
+    ils._session = mock_live_session
 
     await ils.interrupt()  # must not raise
 
     assert ils._response_queue.empty()
+    mock_live_session.send_client_content.assert_not_called()
