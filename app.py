@@ -862,6 +862,14 @@ async def websocket_live_agent(websocket: WebSocket):
                 elif msg_type == "end_turn":
                     await session.end_turn()
 
+                elif msg_type == "interrupt":
+                    if session:
+                        try:
+                            await session.send_text(".")
+                        except Exception:
+                            pass
+                    await websocket.send_json({"type": "interrupted"})
+
                 elif msg_type == "webm_audio":
                     # Client sent WebM-encoded audio — convert to PCM
                     audio_b64 = data.get("content", "")

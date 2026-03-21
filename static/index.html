@@ -2213,7 +2213,12 @@
     let laMicActive = false;
     let laMediaStream = null;
     let laAudioContext = null;
-    let laWorklet = null;
+    let laWorkletNode = null;
+    let laMicSourceNode = null;
+    let laAnalyserNode = null;
+    let laVisualizerRaf = null;
+    let laMicStartLockUntil = 0;
+    let laWorkletModuleLoaded = false;
     let laPlaybackCtx = null;
     let laPlaybackQueue = [];
     let laPlaying = false;
@@ -2328,7 +2333,7 @@
                         laAddMessage('agent', '🔊 Audio response delivered', 'audio');
                         break;
                     case 'interrupted':
-                        laSetStatus('Interrupted — listening…', 'var(--amber)');
+                        laSetStatus('You interrupted — listening...', 'var(--amber)');
                         laStopPlayback();
                         break;
                     case 'error':
@@ -2407,6 +2412,9 @@
 
     async function laStartMic() {
         if (!laConnected || !laWs) return;
+        const now = Date.now();
+        if (now < laMicStartLockUntil) return;
+        laMicStartLockUntil = now + 200;
         try {
             if (!laMediaStream) {
                 laMediaStream = await navigator.mediaDevices.getUserMedia({
@@ -2414,57 +2422,122 @@
                 });
             }
 
-            // Use ScriptProcessorNode to capture raw PCM16 16kHz audio and send as
-            // binary WebSocket frames — each 500ms MediaRecorder WebM chunk is not
-            // independently decodable, so we go direct PCM instead.
             if (!laAudioContext) {
-                laAudioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+                laAudioContext = new (window.AudioContext || window.webkitAudioContext)();
+                laWorkletModuleLoaded = false;
             }
-            const source = laAudioContext.createMediaStreamSource(laMediaStream);
-            const processor = laAudioContext.createScriptProcessor(4096, 1, 1);
-            processor.onaudioprocess = (e) => {
+
+            if (laAudioContext.state === 'suspended') {
+                try {
+                    await laAudioContext.resume();
+                } catch (_) {}
+            }
+
+            if (!laAudioContext.audioWorklet) {
+                laSetStatus('AudioWorklet not supported in this browser', 'var(--red)');
+                return;
+            }
+
+            if (laWorkletNode) {
+                laWorkletNode.disconnect();
+                laWorkletNode = null;
+            }
+            if (laMicSourceNode) {
+                laMicSourceNode.disconnect();
+                laMicSourceNode = null;
+            }
+            if (laAnalyserNode) {
+                laAnalyserNode.disconnect();
+                laAnalyserNode = null;
+            }
+
+            if (!laWorkletModuleLoaded) {
+                const workletCode = `
+class PCMProcessor extends AudioWorkletProcessor {
+    constructor() {
+        super();
+        this._targetRate = 16000;
+        this._targetSamples = 1600;
+        this._ratio = sampleRate / this._targetRate;
+        this._sourceBuffer = [];
+        this._resamplePos = 0;
+        this._pcmBuffer = [];
+    }
+
+    _toInt16(sample) {
+        const clamped = Math.max(-1, Math.min(1, sample));
+        return clamped < 0 ? Math.round(clamped * 32768) : Math.round(clamped * 32767);
+    }
+
+    process(inputs) {
+        const input = inputs[0] && inputs[0][0];
+        if (!input || input.length === 0) return true;
+
+        if (sampleRate === this._targetRate) {
+            for (let i = 0; i < input.length; i++) {
+                this._pcmBuffer.push(this._toInt16(input[i]));
+            }
+        } else {
+            for (let i = 0; i < input.length; i++) {
+                this._sourceBuffer.push(input[i]);
+            }
+
+            while (this._resamplePos + 1 < this._sourceBuffer.length) {
+                const i0 = Math.floor(this._resamplePos);
+                const i1 = i0 + 1;
+                const frac = this._resamplePos - i0;
+                const s0 = this._sourceBuffer[i0] || 0;
+                const s1 = this._sourceBuffer[i1] || 0;
+                const interpolated = s0 + (s1 - s0) * frac;
+                this._pcmBuffer.push(this._toInt16(interpolated));
+                this._resamplePos += this._ratio;
+            }
+
+            const consumed = Math.floor(this._resamplePos);
+            if (consumed > 0) {
+                this._sourceBuffer.splice(0, consumed);
+                this._resamplePos -= consumed;
+            }
+        }
+
+        while (this._pcmBuffer.length >= this._targetSamples) {
+            const chunk = this._pcmBuffer.splice(0, this._targetSamples);
+            this.port.postMessage(new Int16Array(chunk));
+        }
+
+        return true;
+    }
+}
+
+registerProcessor('pcm-processor', PCMProcessor);
+`;
+                const blob = new Blob([workletCode], { type: 'application/javascript' });
+                const workletUrl = URL.createObjectURL(blob);
+                await laAudioContext.audioWorklet.addModule(workletUrl);
+                URL.revokeObjectURL(workletUrl);
+                laWorkletModuleLoaded = true;
+            }
+
+            laMicSourceNode = laAudioContext.createMediaStreamSource(laMediaStream);
+            laAnalyserNode = laAudioContext.createAnalyser();
+            laAnalyserNode.fftSize = 256;
+
+            laWorkletNode = new AudioWorkletNode(laAudioContext, 'pcm-processor');
+            laWorkletNode.port.onmessage = (e) => {
                 if (!laMicActive || !laWs || laWs.readyState !== WebSocket.OPEN) return;
-                const inputSampleRate = laAudioContext && laAudioContext.sampleRate ? laAudioContext.sampleRate : 16000;
-                const float32 = e.inputBuffer.getChannelData(0);
-
-                let pcmSource = float32;
-
-                // If the AudioContext sample rate is not 16kHz, resample to 16kHz before sending
-                if (inputSampleRate !== 16000) {
-                    const targetSampleRate = 16000;
-                    const sampleRateRatio = inputSampleRate / targetSampleRate;
-                    const targetLength = Math.round(float32.length / sampleRateRatio);
-                    const resampled = new Float32Array(targetLength);
-
-                    for (let i = 0; i < targetLength; i++) {
-                        const sourceIndex = i * sampleRateRatio;
-                        const indexInt = Math.floor(sourceIndex);
-                        const indexFrac = sourceIndex - indexInt;
-
-                        const s0 = float32[indexInt] || 0;
-                        const s1 = float32[Math.min(indexInt + 1, float32.length - 1)] || 0;
-
-                        resampled[i] = s0 + (s1 - s0) * indexFrac;
-                    }
-
-                    pcmSource = resampled;
+                laWs.send(e.data.buffer);
+                if (laPlaying && detectVoiceActivity(e.data)) {
+                    laHandleBargein();
                 }
-
-                // Convert Float32 → Int16 PCM (at 16kHz)
-                const int16 = new Int16Array(pcmSource.length);
-                for (let i = 0; i < pcmSource.length; i++) {
-                    const s = pcmSource[i];
-                    int16[i] = Math.max(-32768, Math.min(32767, Math.round(s * 32767)));
-                }
-                // Send raw PCM16 as binary WebSocket message
-                laWs.send(int16.buffer);
             };
-            source.connect(processor);
+
+            laMicSourceNode.connect(laWorkletNode);
+            laMicSourceNode.connect(laAnalyserNode);
+
             const silentGain = laAudioContext.createGain();
             silentGain.gain.value = 0;
-            processor.connect(silentGain);
+            laWorkletNode.connect(silentGain);
             silentGain.connect(laAudioContext.destination);
-            laWorklet = processor;
 
             laMicActive = true;
             const micBtn = document.getElementById('la-mic-btn');
@@ -2482,9 +2555,22 @@
 
     function laMuteMic() {
         laMicActive = false;
-        if (laWorklet) {
-            laWorklet.disconnect();
-            laWorklet = null;
+        if (laWorkletNode) {
+            laWorkletNode.port.onmessage = null;
+            laWorkletNode.disconnect();
+            laWorkletNode = null;
+        }
+        if (laMicSourceNode) {
+            laMicSourceNode.disconnect();
+            laMicSourceNode = null;
+        }
+        if (laAnalyserNode) {
+            laAnalyserNode.disconnect();
+            laAnalyserNode = null;
+        }
+        if (laVisualizerRaf) {
+            cancelAnimationFrame(laVisualizerRaf);
+            laVisualizerRaf = null;
         }
         // Signal end of user turn so the model responds
         if (laWs && laConnected && laWs.readyState === WebSocket.OPEN) {
@@ -2502,13 +2588,27 @@
 
     function laStopMic() {
         laMicActive = false;
-        if (laWorklet) {
-            laWorklet.disconnect();
-            laWorklet = null;
+        if (laWorkletNode) {
+            laWorkletNode.port.onmessage = null;
+            laWorkletNode.disconnect();
+            laWorkletNode = null;
+        }
+        if (laMicSourceNode) {
+            laMicSourceNode.disconnect();
+            laMicSourceNode = null;
+        }
+        if (laAnalyserNode) {
+            laAnalyserNode.disconnect();
+            laAnalyserNode = null;
+        }
+        if (laVisualizerRaf) {
+            cancelAnimationFrame(laVisualizerRaf);
+            laVisualizerRaf = null;
         }
         if (laAudioContext) {
             laAudioContext.close().catch(() => {});
             laAudioContext = null;
+            laWorkletModuleLoaded = false;
         }
         if (laMediaStream) {
             laMediaStream.getTracks().forEach(t => t.stop());
@@ -2584,25 +2684,40 @@
         }
     }
 
+    function detectVoiceActivity(int16Array) {
+        if (!int16Array || int16Array.length === 0) return false;
+        let sum = 0;
+        for (let i = 0; i < int16Array.length; i++) {
+            const normalized = int16Array[i] / 32768;
+            sum += normalized * normalized;
+        }
+        const rms = Math.sqrt(sum / int16Array.length);
+        return rms > 0.015;
+    }
+
+    function laHandleBargein() {
+        if (!laPlaying) return;
+        laStopPlayback();
+        laSetStatus('You interrupted — listening...', 'var(--amber)');
+        if (laWs && laWs.readyState === WebSocket.OPEN) {
+            laWs.send(JSON.stringify({ type: 'interrupt' }));
+        }
+    }
+
     // Simple visualizer for mic input
     function laDrawVisualizer() {
-        if (!laMediaStream || !laMicActive) return;
-        const ctx = new (window.AudioContext || window.webkitAudioContext)();
-        const src = ctx.createMediaStreamSource(laMediaStream);
-        const analyser = ctx.createAnalyser();
-        analyser.fftSize = 256;
-        src.connect(analyser);
+        if (!laMicActive || !laAnalyserNode) return;
         const canvas = document.getElementById('la-visualizer-canvas');
         const canvasCtx = canvas.getContext('2d');
         canvas.width = canvas.offsetWidth * 2;
         canvas.height = canvas.offsetHeight * 2;
-        const bufLen = analyser.frequencyBinCount;
+        const bufLen = laAnalyserNode.frequencyBinCount;
         const data = new Uint8Array(bufLen);
 
         function draw() {
-            if (!laMicActive) { ctx.close(); return; }
-            requestAnimationFrame(draw);
-            analyser.getByteFrequencyData(data);
+            if (!laMicActive || !laAnalyserNode) return;
+            laVisualizerRaf = requestAnimationFrame(draw);
+            laAnalyserNode.getByteFrequencyData(data);
             canvasCtx.clearRect(0, 0, canvas.width, canvas.height);
             const barW = (canvas.width / bufLen) * 2.5;
             let x = 0;

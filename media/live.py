@@ -429,6 +429,20 @@ class InterruptibleLiveSession:
         except Exception as e:
             logger.warning("[Live API] end_turn failed: %s", e)
 
+    async def interrupt(self) -> None:
+        """Signal barge-in — stop current model turn."""
+        if self._closed or not self._session:
+            return
+        try:
+            await self._session.send_client_content(
+                turns=types.Content(parts=[types.Part(text=".")]),
+                turn_complete=True,
+            )
+            self._model_speaking = False
+            await self._response_queue.put(None)
+        except Exception as e:
+            logger.warning("[Live API] interrupt() failed: %s", e)
+
     async def receive_audio(self) -> AsyncGenerator[bytes, None]:
         """Yield PCM16 audio chunks as the model speaks.
 
