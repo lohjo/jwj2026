@@ -2777,6 +2777,7 @@ registerProcessor('pcm-processor', PCMProcessor);
 
     function laHandleBargein() {
         if (!laPlaying) return;
+        laCurrentTurnInterrupted = true;
         laStopPlayback();
         laSetStatus('You interrupted — listening...', 'var(--amber)');
         if (laWs && laWs.readyState === WebSocket.OPEN) {
