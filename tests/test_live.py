@@ -207,24 +207,32 @@ async def test_interrupt_unblocks_receive_audio_and_does_not_leak_subsequent_chu
     # Start draining the queue in the background
     collect_task = asyncio.create_task(_collect())
 
-    # Wait deterministically until both pre-interrupt chunks have been
-    # consumed so we can be sure the consumer is now blocked waiting for
-    # the next item before we call interrupt().
-    await asyncio.wait_for(pre_interrupt_drained.wait(), timeout=1.0)
+    try:
+        # Wait deterministically until both pre-interrupt chunks have been
+        # consumed so we can be sure the consumer is now blocked waiting for
+        # the next item before we call interrupt().
+        await asyncio.wait_for(pre_interrupt_drained.wait(), timeout=1.0)
 
-    # Interrupt — this sets _model_speaking=False and enqueues None
-    await ils.interrupt()
+        # Interrupt — this sets _model_speaking=False and enqueues None
+        await ils.interrupt()
 
-    # Enqueue a chunk that arrives after the interrupt; it must not be yielded
-    await ils._response_queue.put(chunk_after)
+        # Enqueue a chunk that arrives after the interrupt; it must not be yielded
+        await ils._response_queue.put(chunk_after)
 
-    await asyncio.wait_for(collect_task, timeout=2.0)
+        await asyncio.wait_for(collect_task, timeout=2.0)
 
-    # We must receive exactly the two pre-interrupt chunks, in order, and nothing else.
-    assert received == [chunk_before_1, chunk_before_2], (
-        "receive_audio() must yield exactly the two pre-interrupt chunks in order"
-    )
-    assert not ils.is_model_speaking, "_model_speaking should be False after interrupt"
+        # We must receive exactly the two pre-interrupt chunks, in order, and nothing else.
+        assert received == [chunk_before_1, chunk_before_2], (
+            "receive_audio() must yield exactly the two pre-interrupt chunks in order"
+        )
+        assert not ils.is_model_speaking, "_model_speaking should be False after interrupt"
+    finally:
+        if not collect_task.done():
+            collect_task.cancel()
+            try:
+                await collect_task
+            except asyncio.CancelledError:
+                pass
 
 
 @pytest.mark.asyncio
