@@ -30,7 +30,11 @@ def _get_ch_client():
     """Return a cached clickhouse-connect client. Never raises."""
     global _ch_client
     if _ch_client is not None:
-        return _ch_client
+        try:
+            _ch_client.ping()
+            return _ch_client
+        except Exception:
+            _ch_client = None
 
     if not CLICKHOUSE_HOST or not CLICKHOUSE_PASSWORD:
         return None
