@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from media.live import live_voice_exchange, _pcm_to_ogg, InterruptibleLiveSession
+from media.live import InterruptibleLiveSession, live_voice_exchange, _pcm_to_ogg
 
 
 # ---------------------------------------------------------------------------
@@ -167,6 +167,99 @@ def test_pcm_to_ogg_returns_empty_bytes_on_pydub_error():
 
 
 # ---------------------------------------------------------------------------
+# InterruptibleLiveSession.interrupt() — focused unit tests
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_interrupt_unblocks_receive_audio_and_does_not_leak_subsequent_chunks():
+    """interrupt() must:
+    - unblock a receive_audio() call that is waiting for more data
+    - return only the chunks that were enqueued before the interrupt sentinel
+    - not yield any chunk enqueued after interrupt() is called
+    """
+    ils = InterruptibleLiveSession(system_context="test")
+
+    # Inject a non-None live session so interrupt() does not early-return when _session is None
+    mock_live_session = AsyncMock()
+    ils._session = mock_live_session
+    ils._model_speaking = True
+
+    # Pre-interrupt audio chunks
+    chunk_before_1 = b"\x10\x11" * 100
+    chunk_before_2 = b"\x20\x21" * 100
+    # Post-interrupt audio chunk — must never appear in the output
+    chunk_after = b"\x30\x31" * 100
+
+    # Enqueue the two pre-interrupt chunks as if the model was already speaking
+    await ils._response_queue.put(chunk_before_1)
+    await ils._response_queue.put(chunk_before_2)
+
+    received: list[bytes] = []
+    pre_interrupt_drained = asyncio.Event()
+
+    async def _collect() -> None:
+        async for chunk in ils.receive_audio():
+            received.append(chunk)
+            # Once both pre-interrupt chunks have been consumed, signal the test
+            if len(received) == 2:
+                pre_interrupt_drained.set()
+
+    # Start draining the queue in the background
+    collect_task = asyncio.create_task(_collect())
+
+    try:
+        # Wait deterministically until both pre-interrupt chunks have been
+        # consumed so we can be sure the consumer is now blocked waiting for
+        # the next item before we call interrupt().
+        await asyncio.wait_for(pre_interrupt_drained.wait(), timeout=1.0)
+
+        # Interrupt — this sets _model_speaking=False and enqueues None
+        await ils.interrupt()
+
+        # Enqueue a chunk that arrives after the interrupt; it must not be yielded
+        await ils._response_queue.put(chunk_after)
+
+        await asyncio.wait_for(collect_task, timeout=2.0)
+
+        # We must receive exactly the two pre-interrupt chunks, in order, and nothing else.
+        assert received == [chunk_before_1, chunk_before_2], (
+            "receive_audio() must yield exactly the two pre-interrupt chunks in order"
+        )
+        assert not ils.is_model_speaking, "_model_speaking should be False after interrupt"
+    finally:
+        if not collect_task.done():
+            collect_task.cancel()
+            try:
+                await collect_task
+            except asyncio.CancelledError:
+                pass
+
+
+@pytest.mark.asyncio
+async def test_interrupt_sets_model_speaking_false():
+    """interrupt() must clear the is_model_speaking flag."""
+    ils = InterruptibleLiveSession(system_context="test")
+    mock_live_session = AsyncMock()
+    ils._session = mock_live_session
+    ils._model_speaking = True
+
+    await ils.interrupt()
+
+    assert not ils.is_model_speaking
+
+
+@pytest.mark.asyncio
+async def test_interrupt_while_session_closed_is_a_noop():
+    """interrupt() on a closed session must not raise and must not enqueue anything."""
+    ils = InterruptibleLiveSession(system_context="test")
+    ils._closed = True
+    mock_live_session = AsyncMock()
+    ils._session = mock_live_session
+
+    await ils.interrupt()  # must not raise
+
+    assert ils._response_queue.empty()
+    mock_live_session.send_client_content.assert_not_called()
 # InterruptibleLiveSession — interrupt() correctness
 # ---------------------------------------------------------------------------
 
