@@ -1,14 +1,14 @@
 """
-SENTINEL SDK Consistency Verification
+SENTINEL SDK/ADK Consistency Verification
 
-Runs 4 assertions to verify the full consistency stack:
+Runs assertions to verify runtime consistency:
 1. config.py constants loaded
 2. CLAUDE.md exists at project root
-3. SentinelRunner options are correct
-4. Live smoke test returns an assistant message
+3. ADK runner singleton is importable
+4. Optional smoke test can run a simple prompt
 
 Usage:
-    python verify_sdk_consistency.py
+    python tests/verify_sdk_consistency.py
 """
 
 import asyncio
@@ -38,32 +38,21 @@ async def verify():
     assert len(content) > 100, "CLAUDE.md is empty or too short"
     print("✅ CLAUDE.md exists at project root")
 
-    # 3. Runner options
-    from pipeline.sdk_runner import sentinel_runner
+    # 3. ADK runner import
+    from pipeline.adk_runner import sentinel_runner, root_agent
+    assert callable(getattr(sentinel_runner, "run", None)), "sentinel_runner.run missing"
+    assert getattr(root_agent, "name", ""), "root_agent name missing"
+    print("✅ ADK runner import check passed")
 
-    opts = sentinel_runner._build_options()
-    assert opts.append_system_prompt is not None, "append_system_prompt not set"
-    assert "SENTINEL" in opts.append_system_prompt, "SENTINEL_APPEND_PROMPT not in append"
-    assert opts.max_turns == 10, "max_turns should be 10"
-    print("✅ SentinelRunner options correct")
-
-    # 4. Smoke test — single turn (requires Claude Code CLI installed)
+    # 4. Optional smoke test — single turn (requires credentials and network)
     try:
-        from claude_code_sdk import query, ClaudeCodeOptions
-
-        msgs = await sentinel_runner.run("Reply with exactly: SENTINEL_OK")
-        assert any(
-            type(m).__name__ == "AssistantMessage"
-            for m in msgs
-        ), "No assistant message returned"
-        print("✅ SDK smoke test passed — got assistant response")
-    except FileNotFoundError:
-        print("⚠️  Claude Code CLI not found — skipping live smoke test")
-        print("   Install with: npm install -g @anthropic-ai/claude-code")
+        events = await sentinel_runner.run("Reply with exactly: SENTINEL_OK")
+        assert isinstance(events, list), "ADK runner should return a list of events"
+        print("✅ ADK smoke test passed — got event stream")
     except Exception as e:
-        print(f"⚠️  SDK smoke test skipped — {e}")
+        print(f"⚠️  ADK smoke test skipped — {e}")
 
-    print("\n✅ All verifiable checks passed. SDK consistency stack is configured.")
+    print("\n✅ All verifiable checks passed. ADK consistency stack is configured.")
 
 
 if __name__ == "__main__":

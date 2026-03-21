@@ -45,8 +45,8 @@ You are SENTINEL, an AI content detection assistant for Singapore users.
 {SENTINEL_APPEND_PROMPT}
 """
 
-root_agent = sentinel_agent = Agent(
-    name="sentinel_agent",
+root_agent = Agent(
+    name="sentinel_root_agent",
     model=GEMINI_MODEL,
     instruction=SENTINEL_INSTRUCTION,
     description="SENTINEL AI content detection assistant for Singapore",
@@ -69,7 +69,7 @@ class SentinelADKRunner:
     def __init__(self) -> None:
         self._session_service = InMemorySessionService()
         self._runner = Runner(
-            agent=sentinel_agent,
+            agent=root_agent,
             app_name="sentinel",
             session_service=self._session_service,
         )
@@ -116,4 +116,5 @@ class SentinelADKRunner:
 
 adk_runner = SentinelADKRunner()
 sentinel_runner = adk_runner
-
+# Backward-compatibility aliases: sentinel_runner for runner, sentinel_agent for root agent.
+sentinel_agent = root_agent

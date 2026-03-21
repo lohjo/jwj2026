@@ -56,8 +56,16 @@ async def call_llm(prompt: str, max_tokens: int = 1024) -> tuple[str, str]:
         if GOOGLE_GENAI_USE_VERTEXAI:
             project = GOOGLE_CLOUD_PROJECT
             location = GOOGLE_CLOUD_LOCATION
-            if not project or not location:
-                raise RuntimeError("Missing GOOGLE_CLOUD_PROJECT or GOOGLE_CLOUD_LOCATION")
+            if not project:
+                raise RuntimeError(
+                    "Missing required environment variable: GOOGLE_CLOUD_PROJECT "
+                    "(set in .env for local development or as an environment variable in production)"
+                )
+            if not location:
+                raise RuntimeError(
+                    "Missing required environment variable: GOOGLE_CLOUD_LOCATION "
+                    "(set in .env for local development or as an environment variable in production)"
+                )
             client = genai.Client(vertexai=True, project=project, location=location)
         else:
             if not GEMINI_API_KEY or GEMINI_API_KEY.lower().startswith("your_"):

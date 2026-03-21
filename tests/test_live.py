@@ -294,15 +294,17 @@ async def test_send_audio_does_not_interrupt_when_model_not_speaking():
 
 @pytest.mark.asyncio
 async def test_explicit_interrupt_message_calls_interrupt():
-    """Explicit interrupt signal must still call session.interrupt()."""
+    """Explicit interrupt path must still execute interrupt() behavior."""
     ils = InterruptibleLiveSession(system_context="test")
     ils._model_speaking = True
     ils._session = AsyncMock()
+    ils._user_stream_open = False
 
-    with patch.object(ils, "interrupt", new=AsyncMock()) as mock_interrupt:
-        await ils.interrupt()
+    await ils.interrupt()
 
-    mock_interrupt.assert_awaited_once()
+    assert ils._model_speaking is False
+    assert ils._response_queue.qsize() == 1
+    assert ils._response_queue.get_nowait() is None
 
 
 @pytest.mark.asyncio

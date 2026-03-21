@@ -76,10 +76,13 @@ async def run_research(query: str, tool_context: ToolContext) -> dict:
 async def get_session_stats(tool_context: ToolContext) -> dict:
     """Get current session detection statistics."""
     start = tool_context.state.get("session_start", time.time())
+    # detection_count is a backward-compatible alias for existing clients that
+    # consume session stats; llm_invocation_count is the canonical field.
+    llm_invocation_count = tool_context.state.get("llm_invocation_count", 0)
     return {
         "status": "success",
-        "detection_count": tool_context.state.get("detection_count", 0),
+        "detection_count": llm_invocation_count,
+        "llm_invocation_count": llm_invocation_count,
         "session_duration_s": round(time.time() - start, 1),
         "tools_used": tool_context.state.get("content_types_seen", [])[-10:],
     }
-

@@ -2502,10 +2502,9 @@ class PCMProcessor extends AudioWorkletProcessor {
         this._targetSamples = 1600;
         this._ratio         = sampleRate / this._targetRate;
 
-        // CRITICAL: _pcmCap and _srcCap MUST be powers of 2 for bitwise-AND modulo to work.
-        // Current: _pcmCap=8192 (2^13), _srcCap=4096 (2^12). Do NOT change to non-powers-of-2.
-        // Fixed-size ring buffers (power-of-2 capacities → cheap bitwise-AND modulo).
-        // Avoids Array push/splice O(n) copies and GC pressure in the audio thread.
+        // CRITICAL: Ring buffer capacities (_srcCap, _pcmCap) MUST be powers of 2
+        // for bitwise-AND modulo. Keep this approach to avoid Array push/splice
+        // O(n) overhead and audio-thread GC pressure.
         this._srcCap   = 4096;
         this._srcBuf   = new Float32Array(this._srcCap);
         this._srcWrite = 0;
