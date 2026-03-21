@@ -889,9 +889,12 @@ async def websocket_live_agent(websocket: WebSocket):
         """Forward model audio chunks to the WebSocket client."""
         try:
             while session and not session._closed:
+                sent_turn_start = False
                 async for chunk in session.receive_audio():
                     try:
-                        await websocket.send_json({"type": "turn_start"})
+                        if not sent_turn_start:
+                            await websocket.send_json({"type": "turn_start"})
+                            sent_turn_start = True
                         # Convert PCM chunk to base64 for JSON transport
                         await websocket.send_json({
                             "type": "audio",
@@ -900,9 +903,9 @@ async def websocket_live_agent(websocket: WebSocket):
                     except Exception:
                         return
                 try:
-                    if session.is_model_speaking:
+                    if session.last_receive_interrupted:
                         await websocket.send_json({"type": "interrupted"})
-                    else:
+                    elif sent_turn_start:
                         await websocket.send_json({"type": "turn_end"})
                 except Exception:
                     return

@@ -290,6 +290,55 @@ async def test_send_audio_does_not_interrupt_when_model_not_speaking():
 
     mock_interrupt.assert_not_awaited()
     mock_live_session.send_realtime_input.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_end_turn_uses_audio_stream_end_when_user_stream_open():
+    """end_turn() should close realtime audio stream before model response."""
+    ils = InterruptibleLiveSession(system_context="test")
+    mock_live_session = AsyncMock()
+    ils._session = mock_live_session
+    ils._user_stream_open = True
+
+    await ils.end_turn()
+
+    mock_live_session.send_realtime_input.assert_awaited_once_with(audio_stream_end=True)
+    assert ils._user_stream_open is False
+
+
+@pytest.mark.asyncio
+async def test_end_turn_falls_back_to_client_content_when_stream_end_unsupported():
+    """end_turn() should gracefully fall back when audio_stream_end is unsupported."""
+    ils = InterruptibleLiveSession(system_context="test")
+    mock_live_session = AsyncMock()
+    mock_live_session.send_realtime_input.side_effect = RuntimeError("unsupported")
+    ils._session = mock_live_session
+    ils._user_stream_open = True
+
+    await ils.end_turn()
+
+    assert mock_live_session.send_client_content.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_receive_audio_marks_interrupted_after_interrupt_signal():
+    """receive_audio() should expose interrupted termination to websocket layer."""
+    ils = InterruptibleLiveSession(system_context="test")
+    ils._session = AsyncMock()
+
+    async def _drain() -> list[bytes]:
+        out = []
+        async for chunk in ils.receive_audio():
+            out.append(chunk)
+        return out
+
+    task = asyncio.create_task(_drain())
+    await asyncio.sleep(0)
+    await ils.interrupt()
+    chunks = await asyncio.wait_for(task, timeout=1.0)
+
+    assert chunks == []
+    assert ils.last_receive_interrupted is True
 # InterruptibleLiveSession — interrupt() correctness
 # ---------------------------------------------------------------------------
 

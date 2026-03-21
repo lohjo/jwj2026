@@ -281,12 +281,25 @@ async def research_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
         result = await research(query)
 
+        if result.get("error"):
+            error_msg = result.get("error", "Research failed.")
+            await update.message.reply_text(f"⚠️ {error_msg}")
+            return
+
         if result.get("cache_hit") and result.get("skill_path"):
-            skill_text = Path(result["skill_path"]).read_text(encoding="utf-8")
+            skill_path = Path(result["skill_path"])
+            if not skill_path.exists():
+                await update.message.reply_text("⚠️ Cached research file was not found.")
+                return
+            skill_text = skill_path.read_text(encoding="utf-8")
             preview = skill_text[:800]
             response = f"📚 <b>Cached Skill Card</b>\n\n<pre>{preview}</pre>"
         elif result.get("summary_path"):
-            summary_text = Path(result["summary_path"]).read_text(encoding="utf-8")
+            summary_path = Path(result["summary_path"])
+            if not summary_path.exists():
+                await update.message.reply_text("⚠️ Research summary file was not found.")
+                return
+            summary_text = summary_path.read_text(encoding="utf-8")
             preview = summary_text[:800]
             response = (
                 f"📝 <b>Research Summary</b>\n\n{preview}\n\n"

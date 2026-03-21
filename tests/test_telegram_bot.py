@@ -397,6 +397,44 @@ class TestResearchCommand:
             last_reply = update.message.reply_text.call_args_list[-1].args[0]
             assert "failed" in last_reply.lower() or "❌" in last_reply
 
+    @pytest.mark.asyncio
+    async def test_structured_error_is_returned_to_user(self):
+        from telegram_bot import research_command
+
+        update = _make_update()
+        ctx = _make_context(args=["fact", "check"])
+
+        with patch("research_agent.agent.research", new_callable=AsyncMock) as mock_research:
+            mock_research.return_value = {
+                "cache_hit": False,
+                "summary_path": "",
+                "error": "Research unavailable: FIRECRAWL_API_KEY is not configured on the server.",
+            }
+
+            await research_command(update, ctx)
+
+            last_reply = update.message.reply_text.call_args_list[-1].args[0]
+            assert "Research unavailable" in last_reply
+
+    @pytest.mark.asyncio
+    async def test_missing_summary_file_reports_user_friendly_error(self):
+        from telegram_bot import research_command
+
+        update = _make_update()
+        ctx = _make_context(args=["fact", "check"])
+
+        with patch("research_agent.agent.research", new_callable=AsyncMock) as mock_research:
+            mock_research.return_value = {
+                "cache_hit": False,
+                "summary_path": "missing_summary.md",
+                "sources": ["https://example.com"],
+            }
+
+            await research_command(update, ctx)
+
+            last_reply = update.message.reply_text.call_args_list[-1].args[0]
+            assert "summary file was not found" in last_reply.lower()
+
 
 # ═══════════════════════════════════════════════════════════════════════
 # SECTION 6 — handle_text

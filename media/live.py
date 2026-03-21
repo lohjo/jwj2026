@@ -347,10 +347,13 @@ class InterruptibleLiveSession:
         self._receive_task: asyncio.Task | None = None
         self._closed = False
         self._model_speaking = False
+        self._user_stream_open = False
         # Incremented on each interrupt() call. _receive_loop() snapshots this
         # at the start of every message and discards audio from older generations
         # so post-interrupt chunks never leak into the next receive_audio() call.
         self._generation: int = 0
+        self._interrupt_counter: int = 0
+        self._last_receive_interrupted: bool = False
 
     async def __aenter__(self) -> "InterruptibleLiveSession":
         await self.connect()
@@ -382,6 +385,7 @@ class InterruptibleLiveSession:
             # sending new mic audio, interrupt the current model turn first.
             if self._model_speaking:
                 await self.interrupt()
+            self._user_stream_open = True
             await self._session.send_realtime_input(
                 audio=types.Blob(
                     data=pcm_chunk, mime_type="audio/pcm;rate=16000"
@@ -430,12 +434,24 @@ class InterruptibleLiveSession:
         if self._closed or not self._session:
             return
         try:
-            await self._session.send_client_content(
-                turns=types.Content(parts=[types.Part(text=".")]),
-                turn_complete=True,
-            )
+            if self._user_stream_open:
+                await self._session.send_realtime_input(audio_stream_end=True)
+                self._user_stream_open = False
+            else:
+                await self._session.send_client_content(
+                    turns=types.Content(parts=[types.Part(text=".")]),
+                    turn_complete=True,
+                )
         except Exception as e:
-            logger.warning("[Live API] end_turn failed: %s", e)
+            # Vertex currently does not support audio_stream_end; fall back.
+            try:
+                await self._session.send_client_content(
+                    turns=types.Content(parts=[types.Part(text=".")]),
+                    turn_complete=True,
+                )
+                self._user_stream_open = False
+            except Exception:
+                logger.warning("[Live API] end_turn failed: %s", e)
 
     async def interrupt(self) -> None:
         """Signal barge-in — stop current model turn.
@@ -452,6 +468,7 @@ class InterruptibleLiveSession:
             # Advance generation *before* draining so the receive_loop
             # will discard any audio it has not yet enqueued.
             self._generation += 1
+            self._interrupt_counter += 1
             self._model_speaking = False
 
             # Drain audio that was enqueued before we incremented the counter.
@@ -469,6 +486,15 @@ class InterruptibleLiveSession:
                 drained,
             )
 
+            # Best-effort server-side interruption: end any active user audio
+            # stream so the model can stop the current turn promptly.
+            if self._user_stream_open:
+                try:
+                    await self._session.send_realtime_input(audio_stream_end=True)
+                    self._user_stream_open = False
+                except Exception:
+                    logger.debug("[Live API] interrupt audio_stream_end failed", exc_info=True)
+
             # Unblock any active receive_audio() call.
             await self._response_queue.put(None)
         except Exception as e:
@@ -480,6 +506,8 @@ class InterruptibleLiveSession:
         Terminates when the model finishes its turn or is interrupted.
         Can be called again for the next turn.
         """
+        start_interrupt_counter = self._interrupt_counter
+        self._last_receive_interrupted = False
         while True:
             try:
                 chunk = await asyncio.wait_for(
@@ -489,6 +517,9 @@ class InterruptibleLiveSession:
                 logger.warning("[Live API] receive_audio timed out")
                 return
             if chunk is None:
+                self._last_receive_interrupted = (
+                    self._interrupt_counter > start_interrupt_counter
+                )
                 return
             yield chunk
 
@@ -496,6 +527,11 @@ class InterruptibleLiveSession:
     def is_model_speaking(self) -> bool:
         """True while the model is actively generating audio."""
         return self._model_speaking
+
+    @property
+    def last_receive_interrupted(self) -> bool:
+        """True if the most recent receive_audio() ended due to interruption."""
+        return self._last_receive_interrupted
 
     async def _receive_loop(self) -> None:
         """Background task reading from the Live API WebSocket."""
@@ -528,6 +564,7 @@ class InterruptibleLiveSession:
                 # receive_audio() call.
                 if message.server_content.interrupted:
                     logger.info("[Live API] Model interrupted by user")
+                    self._interrupt_counter += 1
                     self._model_speaking = False
                     if gen == self._generation:
                         await self._response_queue.put(None)
