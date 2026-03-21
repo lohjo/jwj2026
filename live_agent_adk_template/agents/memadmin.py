@@ -8,12 +8,12 @@ from __future__ import annotations
 
 from google.adk.agents import Agent
 
-from adk_app.callbacks.semantic_hooks import (
+from live_agent_adk_template.callbacks.semantic_hooks import (
     after_model_callback,
     after_tool_callback,
     before_agent_callback,
 )
-from adk_app.tools.memory_tools import (
+from live_agent_adk_template.tools.memory_tools import (
     edit_node,
     get_atlas_stats,
     get_trajectory_summary,
