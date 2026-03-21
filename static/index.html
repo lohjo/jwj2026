@@ -2214,6 +2214,7 @@
     let laMediaStream = null;
     let laAudioContext = null;
     let laWorkletNode = null;
+    let laSilentGainNode = null;
     let laMicSourceNode = null;
     let laAnalyserNode = null;
     let laVisualizerRaf = null;
@@ -2580,10 +2581,10 @@ registerProcessor('pcm-processor', PCMProcessor);
             laMicSourceNode.connect(laWorkletNode);
             laMicSourceNode.connect(laAnalyserNode);
 
-            const silentGain = laAudioContext.createGain();
-            silentGain.gain.value = 0;
-            laWorkletNode.connect(silentGain);
-            silentGain.connect(laAudioContext.destination);
+            laSilentGainNode = laAudioContext.createGain();
+            laSilentGainNode.gain.value = 0;
+            laWorkletNode.connect(laSilentGainNode);
+            laSilentGainNode.connect(laAudioContext.destination);
 
             laMicActive = true;
             const micBtn = document.getElementById('la-mic-btn');
@@ -2605,6 +2606,10 @@ registerProcessor('pcm-processor', PCMProcessor);
             laWorkletNode.port.onmessage = null;
             laWorkletNode.disconnect();
             laWorkletNode = null;
+        }
+        if (laSilentGainNode) {
+            laSilentGainNode.disconnect();
+            laSilentGainNode = null;
         }
         if (laMicSourceNode) {
             laMicSourceNode.disconnect();
@@ -2638,6 +2643,10 @@ registerProcessor('pcm-processor', PCMProcessor);
             laWorkletNode.port.onmessage = null;
             laWorkletNode.disconnect();
             laWorkletNode = null;
+        }
+        if (laSilentGainNode) {
+            laSilentGainNode.disconnect();
+            laSilentGainNode = null;
         }
         if (laMicSourceNode) {
             laMicSourceNode.disconnect();
