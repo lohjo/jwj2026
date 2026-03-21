@@ -34,6 +34,10 @@ def _get_ch_client():
             _ch_client.ping()
             return _ch_client
         except Exception:
+            logger.info(
+                "[ClickHouse] Cached client ping failed; resetting client",
+                exc_info=True,
+            )
             _ch_client = None
 
     if not CLICKHOUSE_HOST or not CLICKHOUSE_PASSWORD:
