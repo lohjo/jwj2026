@@ -260,3 +260,173 @@ async def test_interrupt_while_session_closed_is_a_noop():
 
     assert ils._response_queue.empty()
     mock_live_session.send_client_content.assert_not_called()
+# InterruptibleLiveSession — interrupt() correctness
+# ---------------------------------------------------------------------------
+
+def _make_interruptible_session_mock():
+    """Return a mock genai.Client whose live.connect() is an async context manager."""
+    mock_session = AsyncMock()
+    mock_session.receive = MagicMock(return_value=_async_iter([]))
+    mock_ctx = AsyncMock()
+    mock_ctx.__aenter__ = AsyncMock(return_value=mock_session)
+    mock_ctx.__aexit__ = AsyncMock(return_value=False)
+    mock_client = MagicMock()
+    mock_client.aio.live.connect.return_value = mock_ctx
+    return mock_client, mock_session
+
+
+@pytest.mark.asyncio
+async def test_interrupt_drains_queued_audio():
+    """interrupt() removes already-enqueued audio chunks from the queue."""
+    with patch("media.live._make_genai_client") as mock_factory:
+        mock_client, _ = _make_interruptible_session_mock()
+        mock_factory.return_value = mock_client
+
+        session = InterruptibleLiveSession()
+        await session.connect()
+
+        # Pre-populate the queue with three audio chunks
+        for i in range(3):
+            await session._response_queue.put(bytes([i]) * 100)
+
+        await session.interrupt()
+
+        # After interrupt() the queue should contain only the None sentinel
+        assert session._response_queue.qsize() == 1
+        sentinel = session._response_queue.get_nowait()
+        assert sentinel is None
+
+        await session.close()
+
+
+@pytest.mark.asyncio
+async def test_interrupt_increments_generation():
+    """interrupt() increments _generation to invalidate in-flight audio."""
+    with patch("media.live._make_genai_client") as mock_factory:
+        mock_client, _ = _make_interruptible_session_mock()
+        mock_factory.return_value = mock_client
+
+        session = InterruptibleLiveSession()
+        await session.connect()
+
+        assert session._generation == 0
+        await session.interrupt()
+        assert session._generation == 1
+        await session.interrupt()
+        assert session._generation == 2
+
+        await session.close()
+
+
+@pytest.mark.asyncio
+async def test_receive_loop_discards_audio_after_interrupt():
+    """Audio that arrives from the server after interrupt() is discarded.
+
+    The receive_loop captures ``gen`` before awaiting the next message.
+    We use a gate to ensure the generation is incremented *while* the loop
+    is suspended waiting for the message, so when the message finally arrives
+    ``gen != self._generation`` and the audio is discarded.
+    """
+    pcm_chunk = b"\xAB" * 200
+
+    audio_part = MagicMock()
+    audio_part.inline_data = MagicMock()
+    audio_part.inline_data.data = pcm_chunk
+
+    audio_msg = MagicMock()
+    audio_msg.server_content = MagicMock()
+    audio_msg.server_content.model_turn = MagicMock()
+    audio_msg.server_content.model_turn.parts = [audio_part]
+    audio_msg.server_content.interrupted = False
+    audio_msg.server_content.turn_complete = False
+
+    # Gate: holds back the message until after interrupt() increments generation.
+    gate = asyncio.Event()
+
+    async def gated_receive():
+        await gate.wait()  # suspends, giving the test a chance to interrupt
+        yield audio_msg
+
+    with patch("media.live._make_genai_client") as mock_factory:
+        mock_client, mock_session = _make_interruptible_session_mock()
+        mock_session.receive = MagicMock(return_value=gated_receive())
+        mock_factory.return_value = mock_client
+
+        ils = InterruptibleLiveSession()
+        await ils.connect()
+
+        # Let the receive_loop start and reach the gate (gen=0 captured).
+        await asyncio.sleep(0)
+
+        # Simulate interrupt(): advance generation while loop is suspended.
+        ils._generation += 1
+
+        # Release the gate so the audio message is delivered.
+        gate.set()
+        await asyncio.sleep(0.05)
+
+        # Queue should contain only the finally-block sentinel; no audio.
+        items = []
+        while not ils._response_queue.empty():
+            items.append(ils._response_queue.get_nowait())
+
+        audio_items = [x for x in items if x is not None]
+        assert audio_items == [], (
+            "Stale audio from a superseded generation must not appear in the queue"
+        )
+
+        await ils.close()
+
+
+@pytest.mark.asyncio
+async def test_receive_loop_omits_turn_complete_sentinel_after_interrupt():
+    """turn_complete does not add a duplicate sentinel when generation changed.
+
+    interrupt() enqueues its own sentinel; the receive_loop must not also
+    enqueue one for the stale turn_complete, or the next receive_audio()
+    call would terminate immediately without yielding any audio.
+    """
+    end_msg = MagicMock()
+    end_msg.server_content = MagicMock()
+    end_msg.server_content.model_turn = None
+    end_msg.server_content.interrupted = False
+    end_msg.server_content.turn_complete = True
+
+    gate = asyncio.Event()
+
+    async def gated_receive():
+        await gate.wait()
+        yield end_msg
+
+    with patch("media.live._make_genai_client") as mock_factory:
+        mock_client, mock_session = _make_interruptible_session_mock()
+        mock_session.receive = MagicMock(return_value=gated_receive())
+        mock_factory.return_value = mock_client
+
+        ils = InterruptibleLiveSession()
+        await ils.connect()
+
+        # Let the receive_loop start and block at the gate (gen=0 captured).
+        await asyncio.sleep(0)
+
+        # Simulate interrupt(): advance generation and enqueue its sentinel.
+        ils._generation += 1
+        await ils._response_queue.put(None)  # interrupt()'s sentinel
+
+        # Release the stale turn_complete message.
+        gate.set()
+        await asyncio.sleep(0.05)
+
+        # Collect everything in the queue (including the finally sentinel).
+        sentinels = []
+        while not ils._response_queue.empty():
+            sentinels.append(ils._response_queue.get_nowait())
+
+        none_count = sum(1 for x in sentinels if x is None)
+        # Expected: 1 from interrupt() + 1 from finally = exactly 2.
+        # The stale turn_complete must NOT add a third.
+        assert none_count == 2, (
+            f"Expected exactly 2 None sentinels (interrupt + finally) but got {none_count}"
+        )
+
+        await ils.close()
