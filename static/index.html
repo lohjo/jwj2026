@@ -2564,9 +2564,12 @@ registerProcessor('pcm-processor', PCMProcessor);
 `;
                 const blob = new Blob([workletCode], { type: 'application/javascript' });
                 const workletUrl = URL.createObjectURL(blob);
-                await laAudioContext.audioWorklet.addModule(workletUrl);
-                URL.revokeObjectURL(workletUrl);
-                laWorkletModuleLoaded = true;
+                try {
+                    await laAudioContext.audioWorklet.addModule(workletUrl);
+                    laWorkletModuleLoaded = true;
+                } finally {
+                    URL.revokeObjectURL(workletUrl);
+                }
             }
 
             laMicSourceNode = laAudioContext.createMediaStreamSource(laMediaStream);
