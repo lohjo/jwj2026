@@ -22,7 +22,14 @@ from telegram.ext import (
     filters,
 )
 
-from config import TELEGRAM_TOKEN, COOLDOWN_SECONDS, HEALTH_PORT
+from config import (
+    TELEGRAM_TOKEN,
+    COOLDOWN_SECONDS,
+    HEALTH_PORT,
+    TELEGRAM_WEBHOOK_ENABLED,
+    TELEGRAM_WEBHOOK_URL,
+    TELEGRAM_WEBHOOK_SECRET,
+)
 from pipeline.translator import detect_language, translate_to_english, translate_from_english
 from pipeline.guard import run_guard_detection
 from pipeline.detector import detect_misinformation, run_full_detection
@@ -55,6 +62,9 @@ except Exception:
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+_webhook_app = None
+_webhook_app_lock = asyncio.Lock()
 
 # ── Rate limiting ─────────────────────────────────────────────────────
 _user_last_request: dict[str, float] = {}
@@ -762,6 +772,100 @@ def _build_app():
     return bot_app
 
 
+async def init_webhook_app() -> bool:
+    """Initialise Telegram application for webhook update processing."""
+    global _webhook_app
+
+    if _webhook_app is not None:
+        return True
+    if not TELEGRAM_TOKEN:
+        logger.warning("TELEGRAM_TOKEN not set — Telegram webhook app will not start")
+        return False
+
+    async with _webhook_app_lock:
+        if _webhook_app is not None:
+            return True
+
+        bot_app = _build_app()
+        try:
+            await bot_app.initialize()
+            await bot_app.start()
+
+            if TELEGRAM_WEBHOOK_URL:
+                webhook_kwargs = {}
+                if TELEGRAM_WEBHOOK_SECRET:
+                    webhook_kwargs["secret_token"] = TELEGRAM_WEBHOOK_SECRET
+                await bot_app.bot.set_webhook(url=TELEGRAM_WEBHOOK_URL, **webhook_kwargs)
+
+            _webhook_app = bot_app
+            logger.info("Telegram webhook application initialised")
+            return True
+        except Exception:
+            logger.exception("Failed to initialise Telegram webhook application")
+            try:
+                await bot_app.stop()
+            except Exception:
+                pass
+            try:
+                await bot_app.shutdown()
+            except Exception:
+                pass
+            return False
+
+
+async def shutdown_webhook_app() -> None:
+    """Shutdown Telegram webhook application cleanly."""
+    global _webhook_app
+
+    async with _webhook_app_lock:
+        bot_app = _webhook_app
+        _webhook_app = None
+
+    if bot_app is None:
+        return
+
+    try:
+        await bot_app.stop()
+    except Exception:
+        logger.debug("Webhook app stop failed", exc_info=True)
+    try:
+        await bot_app.shutdown()
+    except Exception:
+        logger.debug("Webhook app shutdown failed", exc_info=True)
+
+
+async def process_webhook_update(payload: dict) -> bool:
+    """Process a Telegram webhook update payload via PTB dispatcher."""
+    global _webhook_app
+
+    try:
+        if not await init_webhook_app():
+            return False
+        if _webhook_app is None:
+            return False
+
+        update = Update.de_json(payload, _webhook_app.bot)
+        if update is None:
+            return False
+
+        await _webhook_app.process_update(update)
+        return True
+    except Exception:
+        logger.exception("Failed to process Telegram webhook update")
+        return False
+
+
+def get_telegram_runtime_status() -> dict:
+    """Return lightweight runtime status for health diagnostics."""
+    webhook_ready = _webhook_app is not None
+    webhook_running = bool(getattr(_webhook_app, "running", False)) if webhook_ready else False
+    return {
+        "webhook_ready": webhook_ready,
+        "webhook_running": webhook_running,
+        "webhook_enabled": TELEGRAM_WEBHOOK_ENABLED,
+    }
+
+
 def start_bot_background():
     """Start the Telegram bot poller in a daemon thread (non-blocking).
 
@@ -769,6 +873,9 @@ def start_bot_background():
     """
     if not TELEGRAM_TOKEN:
         logger.warning("TELEGRAM_TOKEN not set — Telegram bot will not start")
+        return
+    if TELEGRAM_WEBHOOK_ENABLED:
+        logger.info("Telegram webhook mode enabled — skipping polling startup")
         return
 
     def _run():
@@ -785,6 +892,9 @@ def start_bot():
     """Initialise and start the Telegram bot (blocking — for standalone use)."""
     if not TELEGRAM_TOKEN:
         logger.error("TELEGRAM_TOKEN not set — cannot start bot")
+        sys.exit(1)
+    if TELEGRAM_WEBHOOK_ENABLED:
+        logger.error("TELEGRAM_WEBHOOK_ENABLED=true — polling mode disabled")
         sys.exit(1)
 
     # Standalone mode: start health server for Cloud Run

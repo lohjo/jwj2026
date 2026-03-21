@@ -7,7 +7,7 @@ On startup, also launches the Telegram bot poller in a background thread.
 """
 
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, UploadFile, File, Form, Query, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, UploadFile, File, Form, Query, WebSocket, WebSocketDisconnect, Request, Header
 from fastapi.responses import JSONResponse, HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -25,6 +25,12 @@ from pipeline.insights import run_insights
 from pipeline.translator import detect_language, translate_to_english, translate_from_english
 from pipeline.formatter import format_detection_message
 from pipeline.predict_demo import get_demo_prediction
+from config import (
+    TELEGRAM_BACKGROUND_POLLER_ENABLED,
+    TELEGRAM_WEBHOOK_ENABLED,
+    TELEGRAM_WEBHOOK_PATH,
+    TELEGRAM_WEBHOOK_SECRET,
+)
 
 # Optional media modules — may fail if dependencies are missing
 try:
@@ -63,15 +69,49 @@ AUDIO_MIME_TYPES = {
 
 @asynccontextmanager
 async def lifespan(application: FastAPI):
-    """Start the Telegram bot poller when FastAPI starts up."""
-    try:
-        from telegram_bot import start_bot_background
-        start_bot_background()
-    except Exception as exc:
-        logging.getLogger(__name__).warning(
-            "Telegram bot failed to start: %s — web server will continue without it", exc
+    """Start Telegram in webhook mode (preferred) or poller mode (optional)."""
+    webhook_started = False
+
+    if TELEGRAM_WEBHOOK_ENABLED:
+        if TELEGRAM_BACKGROUND_POLLER_ENABLED:
+            logging.getLogger(__name__).warning(
+                "Both TELEGRAM_WEBHOOK_ENABLED and TELEGRAM_BACKGROUND_POLLER_ENABLED are true; "
+                "webhook mode takes precedence."
+            )
+        try:
+            from telegram_bot import init_webhook_app
+            webhook_started = await init_webhook_app()
+            if not webhook_started:
+                logging.getLogger(__name__).warning(
+                    "Telegram webhook app failed to initialise; webhook endpoint will be unavailable."
+                )
+        except Exception as exc:
+            logging.getLogger(__name__).warning(
+                "Telegram webhook init failed: %s — web server will continue without Telegram", exc
+            )
+    elif TELEGRAM_BACKGROUND_POLLER_ENABLED:
+        try:
+            from telegram_bot import start_bot_background
+            start_bot_background()
+        except Exception as exc:
+            logging.getLogger(__name__).warning(
+                "Telegram bot failed to start: %s — web server will continue without it", exc
+            )
+    else:
+        logging.getLogger(__name__).info(
+            "Telegram startup disabled in web process "
+            "(enable TELEGRAM_WEBHOOK_ENABLED for Cloud Run webhook mode)."
         )
-    yield
+
+    try:
+        yield
+    finally:
+        if TELEGRAM_WEBHOOK_ENABLED and webhook_started:
+            try:
+                from telegram_bot import shutdown_webhook_app
+                await shutdown_webhook_app()
+            except Exception:
+                logging.getLogger(__name__).warning("Telegram webhook shutdown failed", exc_info=True)
 
 
 app = FastAPI(
@@ -112,6 +152,59 @@ async def serve_ui():
 def health():
     """Health check endpoint for Cloud Run."""
     return {"status": "healthy", "service": "sentinel"}
+
+
+@app.get("/health/telegram")
+async def health_telegram():
+    """Telegram runtime diagnostics for webhook/poller mode verification."""
+    diagnostics = {
+        "webhook_enabled": TELEGRAM_WEBHOOK_ENABLED,
+        "background_poller_enabled": TELEGRAM_BACKGROUND_POLLER_ENABLED,
+        "webhook_path": TELEGRAM_WEBHOOK_PATH,
+        "webhook_secret_configured": bool(TELEGRAM_WEBHOOK_SECRET),
+        "webhook_ready": False,
+        "webhook_running": False,
+    }
+
+    try:
+        from telegram_bot import get_telegram_runtime_status
+        runtime = get_telegram_runtime_status() or {}
+        diagnostics["webhook_ready"] = bool(runtime.get("webhook_ready", False))
+        diagnostics["webhook_running"] = bool(runtime.get("webhook_running", False))
+    except Exception as exc:
+        diagnostics["error"] = str(exc)
+
+    return diagnostics
+
+
+@app.post(TELEGRAM_WEBHOOK_PATH)
+async def telegram_webhook(
+    request: Request,
+    x_telegram_bot_api_secret_token: str | None = Header(default=None),
+):
+    """Telegram webhook endpoint for Cloud Run (no polling/getUpdates)."""
+    if not TELEGRAM_WEBHOOK_ENABLED:
+        return JSONResponse(status_code=404, content={"ok": False, "error": "Webhook mode disabled"})
+
+    if TELEGRAM_WEBHOOK_SECRET and x_telegram_bot_api_secret_token != TELEGRAM_WEBHOOK_SECRET:
+        return JSONResponse(status_code=403, content={"ok": False, "error": "Invalid webhook secret"})
+
+    try:
+        payload = await request.json()
+    except Exception:
+        return JSONResponse(status_code=400, content={"ok": False, "error": "Invalid JSON payload"})
+
+    try:
+        from telegram_bot import process_webhook_update
+        processed = await process_webhook_update(payload)
+    except Exception as exc:
+        logger.warning("[API] Telegram webhook processing failed: %s", exc)
+        processed = False
+
+    if not processed:
+        return JSONResponse(status_code=503, content={"ok": False, "error": "Telegram app unavailable"})
+
+    return {"ok": True}
 
 
 # ── Text Detection ────────────────────────────────────────────────────────────

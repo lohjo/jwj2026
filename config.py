@@ -36,6 +36,11 @@ def _optional_bool(key: str, default: bool = False) -> bool:
 
 # ── Telegram ────────────────────────────────────────────────────────────
 TELEGRAM_TOKEN = _require("TELEGRAM_TOKEN")
+TELEGRAM_BACKGROUND_POLLER_ENABLED = _optional_bool("TELEGRAM_BACKGROUND_POLLER_ENABLED", False)
+TELEGRAM_WEBHOOK_ENABLED = _optional_bool("TELEGRAM_WEBHOOK_ENABLED", False)
+TELEGRAM_WEBHOOK_PATH = _optional("TELEGRAM_WEBHOOK_PATH", "/telegram/webhook")
+TELEGRAM_WEBHOOK_URL = _optional("TELEGRAM_WEBHOOK_URL", "")
+TELEGRAM_WEBHOOK_SECRET = _optional("TELEGRAM_WEBHOOK_SECRET", "")
 
 # ── SEA-LION ────────────────────────────────────────────────────────────
 SEALION_API_BASE = _optional("OPENAI_API_BASE", "https://api.sea-lion.ai/v1")
