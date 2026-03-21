@@ -864,10 +864,7 @@ async def websocket_live_agent(websocket: WebSocket):
 
                 elif msg_type == "interrupt":
                     if session:
-                        try:
-                            await session.interrupt()
-                        except Exception:
-                            pass
+                        await session.interrupt()
 
                 elif msg_type == "webm_audio":
                     # Client sent WebM-encoded audio — convert to PCM
