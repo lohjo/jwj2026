@@ -527,10 +527,10 @@ class InterruptibleLiveSession:
                     continue
 
                 if message.server_content.model_turn:
-                    self._model_speaking = True
                     for part in message.server_content.model_turn.parts:
                         if part.inline_data:
                             if gen == self._generation:
+                                self._model_speaking = True
                                 await self._response_queue.put(
                                     part.inline_data.data
                                 )
