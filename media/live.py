@@ -519,11 +519,18 @@ class InterruptibleLiveSession:
                 if not message.server_content:
                     continue
 
-                # Interruption acknowledged by the server (VAD barge-in)
+                # Interruption acknowledged by the server (VAD barge-in).
+                # Only enqueue a sentinel for the *current* generation.  If
+                # interrupt() was called again while we were awaiting this
+                # message (gen != self._generation), the newer interrupt()
+                # already placed its own sentinel and we must not add a
+                # duplicate that would prematurely terminate the next
+                # receive_audio() call.
                 if message.server_content.interrupted:
                     logger.info("[Live API] Model interrupted by user")
                     self._model_speaking = False
-                    await self._response_queue.put(None)
+                    if gen == self._generation:
+                        await self._response_queue.put(None)
                     continue
 
                 if message.server_content.model_turn:

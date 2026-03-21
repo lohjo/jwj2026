@@ -656,3 +656,74 @@ async def test_receive_loop_stale_audio_does_not_set_model_speaking():
         )
 
         await ils.close()
+
+
+@pytest.mark.asyncio
+async def test_receive_loop_stale_interrupted_does_not_add_extra_sentinel():
+    """A stale server_content.interrupted (gen != self._generation) must NOT
+    enqueue an additional sentinel.
+
+    Scenario:
+    - interrupt() is called, bumping _generation from 0 → 1 and placing its
+      own sentinel in the queue.
+    - The server then sends an ``interrupted`` ACK for the *old* turn.
+      Because gen==0 but self._generation==1 when the message is processed,
+      this is a stale ACK.  The receive_loop must discard it without adding
+      another sentinel — otherwise the *next* receive_audio() call would
+      terminate immediately before yielding any audio.
+    """
+    interrupted_msg = MagicMock()
+    interrupted_msg.server_content = MagicMock()
+    interrupted_msg.server_content.model_turn = None
+    interrupted_msg.server_content.interrupted = True
+    interrupted_msg.server_content.turn_complete = False
+
+    gate = asyncio.Event()
+    released = asyncio.Event()
+
+    async def gated_receive():
+        await gate.wait()
+        released.set()
+        yield interrupted_msg
+
+    with patch("media.live._make_genai_client") as mock_factory:
+        mock_client, mock_session = _make_interruptible_session_mock()
+        mock_session.receive = MagicMock(return_value=gated_receive())
+        mock_factory.return_value = mock_client
+
+        ils = InterruptibleLiveSession()
+        await ils.connect()
+
+        # Let the receive_loop start and suspend at the gate (gen=0 captured).
+        await asyncio.sleep(0)
+
+        # Simulate interrupt(): advance generation and enqueue its sentinel.
+        ils._generation += 1
+        await ils._response_queue.put(None)  # interrupt()'s own sentinel
+
+        # Release the stale interrupted ACK (gen=0, current=1 — stale).
+        gate.set()
+        await released.wait()
+        # Yield control to let the receive_loop process the message.
+        await asyncio.sleep(0)
+
+        # Collect everything currently in the queue (before the loop's finally
+        # sentinel arrives on close).
+        sentinels_before_close = []
+        while not ils._response_queue.empty():
+            sentinels_before_close.append(ils._response_queue.get_nowait())
+
+        none_count = sum(1 for x in sentinels_before_close if x is None)
+        # Expected: 1 from interrupt() + 1 from the loop's finally block = 2.
+        # The stale interrupted ACK must NOT add a third sentinel.
+        assert none_count == 2, (
+            f"Stale interrupted ACK must not enqueue a sentinel; "
+            f"expected 2 None sentinels (interrupt + finally) but got {none_count}"
+        )
+
+        # _model_speaking should be False (interrupt() clears it via the loop).
+        assert not ils.is_model_speaking, (
+            "_model_speaking must remain False after a stale interrupted ACK"
+        )
+
+        await ils.close()
