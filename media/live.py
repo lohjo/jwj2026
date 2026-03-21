@@ -452,9 +452,13 @@ class InterruptibleLiveSession:
 
             # Drain audio that was enqueued before we incremented the counter.
             drained = 0
-            while not self._response_queue.empty():
-                self._response_queue.get_nowait()
-                drained += 1
+            while True:
+                try:
+                    self._response_queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    break
+                else:
+                    drained += 1
             logger.debug(
                 "[Live API] interrupt() generation=%d drained=%d chunk(s)",
                 self._generation,
