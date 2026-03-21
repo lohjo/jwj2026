@@ -2225,6 +2225,7 @@
     let laPlaying = false;
     let laPlaybackTime = 0;
     let laMediaRecorder = null;
+    let laCurrentTurnInterrupted = false;
 
     function laSetStatus(text, color) {
         document.getElementById('la-status-text').textContent = text;
@@ -2327,13 +2328,18 @@
                         laPlayAudioChunk(data.data);
                         break;
                     case 'turn_start':
+                        laCurrentTurnInterrupted = false;
                         laSetStatus('SENTINEL is speaking…', 'var(--blue)');
                         break;
                     case 'turn_end':
-                        laSetStatus('Connected — ready', 'var(--green)');
-                        laAddMessage('agent', '🔊 Audio response delivered', 'audio');
+                        if (!laCurrentTurnInterrupted) {
+                            laSetStatus('Connected — ready', 'var(--green)');
+                            laAddMessage('agent', '🔊 Audio response delivered', 'audio');
+                        }
+                        laCurrentTurnInterrupted = false;
                         break;
                     case 'interrupted':
+                        laCurrentTurnInterrupted = true;
                         laSetStatus('You interrupted — listening…', 'var(--amber)');
                         laStopPlayback();
                         break;

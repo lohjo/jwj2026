@@ -601,3 +601,58 @@ async def test_receive_loop_omits_turn_complete_sentinel_after_interrupt():
         )
 
         await ils.close()
+
+
+@pytest.mark.asyncio
+async def test_receive_loop_stale_audio_does_not_set_model_speaking():
+    """Stale audio chunks (gen != current generation) must NOT set _model_speaking.
+
+    After interrupt() increments _generation, the receive_loop may still deliver
+    a model_turn message that was already in-flight.  Since that chunk is
+    discarded, _model_speaking must remain False so that auto-barge-in logic
+    and WS event selection are not confused by a flag that is stuck at True.
+    """
+    pcm_chunk = b"\xCD" * 200
+
+    audio_part = MagicMock()
+    audio_part.inline_data = MagicMock()
+    audio_part.inline_data.data = pcm_chunk
+
+    audio_msg = MagicMock()
+    audio_msg.server_content = MagicMock()
+    audio_msg.server_content.model_turn = MagicMock()
+    audio_msg.server_content.model_turn.parts = [audio_part]
+    audio_msg.server_content.interrupted = False
+    audio_msg.server_content.turn_complete = False
+
+    gate = asyncio.Event()
+
+    async def gated_receive():
+        await gate.wait()
+        yield audio_msg
+
+    with patch("media.live._make_genai_client") as mock_factory:
+        mock_client, mock_session = _make_interruptible_session_mock()
+        mock_session.receive = MagicMock(return_value=gated_receive())
+        mock_factory.return_value = mock_client
+
+        ils = InterruptibleLiveSession()
+        await ils.connect()
+
+        # Let the receive_loop start and block at the gate.
+        await asyncio.sleep(0)
+
+        # Advance generation so the pending message becomes stale.
+        ils._generation += 1
+        assert not ils.is_model_speaking, "Precondition: model should not be speaking"
+
+        # Release the stale audio message.
+        gate.set()
+        await asyncio.sleep(0.05)
+
+        # _model_speaking must still be False: stale chunks must not flip it.
+        assert not ils.is_model_speaking, (
+            "_model_speaking must not be set True by stale audio chunks"
+        )
+
+        await ils.close()
