@@ -275,12 +275,45 @@ async def _never_ending_receive():
 
 
 def _make_interruptible_session_mock():
-    """Return a mock genai.Client whose live.connect() is an async context manager."""
+    """Return a mock genai.Client whose live.connect() is an async context manager.
+
+    The returned session's receive() method yields from a gated async iterator
+    that keeps the receive loop alive until the session is explicitly closed.
+    This avoids timing-dependent completion of the background _receive_loop()
+    during tests that assert on the response queue after interrupt().
+    """
     mock_session = AsyncMock()
-    mock_session.receive = MagicMock(return_value=_never_ending_receive())
+
+    gate = asyncio.Event()
+
+    async def _receive_iter():
+        # Keep the iterator (and thus the receive loop) alive until the gate is set.
+        try:
+            await gate.wait()
+        finally:
+            # Once the gate is set, allow the iterator to complete so that the
+            # production receive loop can run its finally block.
+            return
+        # Unreachable yield to ensure this is treated as an async generator.
+        if False:  # pragma: no cover - defensive; never executed.
+            yield None
+
+    mock_session.receive = MagicMock(return_value=_receive_iter())
+
+    async def _signal_close(*args, **kwargs):
+        gate.set()
+
+    # Ensure that closing the session signals the iterator to finish.
+    mock_session.close = AsyncMock(side_effect=_signal_close)
+
     mock_ctx = AsyncMock()
     mock_ctx.__aenter__ = AsyncMock(return_value=mock_session)
-    mock_ctx.__aexit__ = AsyncMock(return_value=False)
+
+    async def _aexit(*args, **kwargs):
+        gate.set()
+        return False
+
+    mock_ctx.__aexit__ = AsyncMock(side_effect=_aexit)
     mock_client = MagicMock()
     mock_client.aio.live.connect.return_value = mock_ctx
     return mock_client, mock_session
