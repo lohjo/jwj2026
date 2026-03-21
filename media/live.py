@@ -347,6 +347,10 @@ class InterruptibleLiveSession:
         self._receive_task: asyncio.Task | None = None
         self._closed = False
         self._model_speaking = False
+        # Incremented on each interrupt() call. _receive_loop() snapshots this
+        # at the start of every message and discards audio from older generations
+        # so post-interrupt chunks never leak into the next receive_audio() call.
+        self._generation: int = 0
 
     async def __aenter__(self) -> "InterruptibleLiveSession":
         await self.connect()
@@ -430,15 +434,34 @@ class InterruptibleLiveSession:
             logger.warning("[Live API] end_turn failed: %s", e)
 
     async def interrupt(self) -> None:
-        """Signal barge-in — stop current model turn."""
+        """Signal barge-in — stop current model turn.
+
+        Increments the generation counter so that any audio chunks arriving
+        from the previous model turn are discarded by ``_receive_loop``,
+        preventing them from leaking into the next ``receive_audio()`` call.
+        The queue is also drained of any already-enqueued chunks from that
+        prior turn before the sentinel is placed.
+        """
         if self._closed or not self._session:
             return
         try:
-            await self._session.send_client_content(
-                turns=types.Content(parts=[types.Part(text=".")]),
-                turn_complete=True,
-            )
+            # Advance generation *before* draining so the receive_loop
+            # will discard any audio it has not yet enqueued.
+            self._generation += 1
             self._model_speaking = False
+
+            # Drain audio that was enqueued before we incremented the counter.
+            drained = 0
+            while not self._response_queue.empty():
+                self._response_queue.get_nowait()
+                drained += 1
+            logger.debug(
+                "[Live API] interrupt() generation=%d drained=%d chunk(s)",
+                self._generation,
+                drained,
+            )
+
+            # Unblock any active receive_audio() call.
             await self._response_queue.put(None)
         except Exception as e:
             logger.warning("[Live API] interrupt() failed: %s", e)
@@ -469,13 +492,26 @@ class InterruptibleLiveSession:
     async def _receive_loop(self) -> None:
         """Background task reading from the Live API WebSocket."""
         try:
-            async for message in self._session.receive():
+            # Use a manual iterator so we can snapshot _generation *before*
+            # the await for each message.  If interrupt() is called while we
+            # are waiting for the next server message, the snapshot (gen) will
+            # still hold the pre-interrupt value; we then compare it with the
+            # post-interrupt self._generation and discard stale audio.
+            aiter = self._session.receive().__aiter__()
+            while True:
+                # Snapshot generation before yielding control to the event loop.
+                gen = self._generation
+                try:
+                    message = await aiter.__anext__()
+                except StopAsyncIteration:
+                    break
+
                 if self._closed:
                     break
                 if not message.server_content:
                     continue
 
-                # Interruption: user sent new audio while model was speaking
+                # Interruption acknowledged by the server (VAD barge-in)
                 if message.server_content.interrupted:
                     logger.info("[Live API] Model interrupted by user")
                     self._model_speaking = False
@@ -486,13 +522,26 @@ class InterruptibleLiveSession:
                     self._model_speaking = True
                     for part in message.server_content.model_turn.parts:
                         if part.inline_data:
-                            await self._response_queue.put(
-                                part.inline_data.data
-                            )
+                            if gen == self._generation:
+                                await self._response_queue.put(
+                                    part.inline_data.data
+                                )
+                            else:
+                                logger.debug(
+                                    "[Live API] Discarding stale audio "
+                                    "(generation %d, current %d)",
+                                    gen,
+                                    self._generation,
+                                )
 
                 if message.server_content.turn_complete:
                     self._model_speaking = False
-                    await self._response_queue.put(None)
+                    # Only emit the sentinel if no interrupt occurred while we
+                    # were waiting.  interrupt() already enqueued its own
+                    # sentinel, so emitting another would cause the next
+                    # receive_audio() call to return immediately with no audio.
+                    if gen == self._generation:
+                        await self._response_queue.put(None)
         except Exception as e:
             if not self._closed:
                 logger.warning("[Live API] receive_loop error: %s", e)
