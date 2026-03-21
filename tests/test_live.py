@@ -442,6 +442,114 @@ async def test_receive_loop_discards_audio_after_interrupt():
 
 
 @pytest.mark.asyncio
+async def test_receive_loop_stale_model_turn_does_not_set_model_speaking():
+    """A stale model_turn (gen != self._generation) must NOT set _model_speaking=True.
+
+    After interrupt() the flag is False.  If a stale audio chunk arrives from
+    the superseded generation it must be discarded *and* the flag must stay
+    False, otherwise send_audio() would incorrectly call interrupt() again and
+    barge-in logic breaks.
+    """
+    pcm_chunk = b"\xAB" * 200
+
+    audio_part = MagicMock()
+    audio_part.inline_data = MagicMock()
+    audio_part.inline_data.data = pcm_chunk
+
+    audio_msg = MagicMock()
+    audio_msg.server_content = MagicMock()
+    audio_msg.server_content.model_turn = MagicMock()
+    audio_msg.server_content.model_turn.parts = [audio_part]
+    audio_msg.server_content.interrupted = False
+    audio_msg.server_content.turn_complete = False
+
+    gate = asyncio.Event()
+
+    async def gated_receive():
+        await gate.wait()
+        yield audio_msg
+
+    with patch("media.live._make_genai_client") as mock_factory:
+        mock_client, mock_session = _make_interruptible_session_mock()
+        mock_session.receive = MagicMock(return_value=gated_receive())
+        mock_factory.return_value = mock_client
+
+        ils = InterruptibleLiveSession()
+        await ils.connect()
+
+        # Receive_loop is waiting at the gate with gen=0 captured.
+        await asyncio.sleep(0)
+
+        # Simulate interrupt() — advances generation; flag is cleared.
+        ils._generation += 1
+        ils._model_speaking = False
+
+        # Release the stale audio message (gen=0, current=1 — stale).
+        gate.set()
+        await asyncio.sleep(0.05)
+
+        assert not ils.is_model_speaking, (
+            "_model_speaking must remain False after a stale model_turn "
+            "from a superseded generation"
+        )
+
+        await ils.close()
+
+
+@pytest.mark.asyncio
+async def test_receive_loop_stale_turn_complete_does_not_clear_model_speaking():
+    """A stale turn_complete (gen != self._generation) must NOT clear _model_speaking.
+
+    If a new generation is already in progress (_model_speaking=True), a
+    turn_complete arriving from the previous generation must not prematurely
+    set _model_speaking=False.
+    """
+    end_msg = MagicMock()
+    end_msg.server_content = MagicMock()
+    end_msg.server_content.model_turn = None
+    end_msg.server_content.interrupted = False
+    end_msg.server_content.turn_complete = True
+
+    # gate_open: release the stale turn_complete message
+    # hold_open: keep the generator alive so finally block doesn't run
+    gate_open = asyncio.Event()
+    hold_open = asyncio.Event()
+
+    async def gated_receive():
+        await gate_open.wait()  # suspends so we can bump _generation first
+        yield end_msg
+        await hold_open.wait()  # keep loop alive so finally block doesn't run
+
+    with patch("media.live._make_genai_client") as mock_factory:
+        mock_client, mock_session = _make_interruptible_session_mock()
+        mock_session.receive = MagicMock(return_value=gated_receive())
+        mock_factory.return_value = mock_client
+
+        ils = InterruptibleLiveSession()
+        await ils.connect()
+
+        # Let the receive_loop start and block at the gate (gen=0 captured).
+        await asyncio.sleep(0)
+
+        # Simulate: interrupt fired, new generation started and is speaking.
+        ils._generation += 1
+        ils._model_speaking = True
+
+        # Release the stale turn_complete from the old generation.
+        gate_open.set()
+        await asyncio.sleep(0.05)
+
+        assert ils.is_model_speaking, (
+            "_model_speaking must remain True when a stale turn_complete "
+            "arrives from a superseded generation while a new generation is "
+            "still in progress"
+        )
+
+        hold_open.set()
+        await ils.close()
+
+
+@pytest.mark.asyncio
 async def test_receive_loop_omits_turn_complete_sentinel_after_interrupt():
     """turn_complete does not add a duplicate sentinel when generation changed.
 
