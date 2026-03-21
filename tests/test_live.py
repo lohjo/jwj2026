@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from media.live import live_voice_exchange, _pcm_to_ogg
+from media.live import InterruptibleLiveSession, live_voice_exchange, _pcm_to_ogg
 
 
 # ---------------------------------------------------------------------------
@@ -163,3 +163,17 @@ def test_pcm_to_ogg_returns_empty_bytes_on_pydub_error():
          patch("media.live.io.BytesIO", side_effect=Exception("pydub error")):
         result = _pcm_to_ogg(b"\x00\x01" * 100)
     assert result == b""
+
+
+@pytest.mark.asyncio
+async def test_interruptible_session_send_audio_interrupts_when_model_speaking():
+    session = InterruptibleLiveSession()
+    session._closed = False
+    session._model_speaking = True
+    session._session = AsyncMock()
+
+    with patch.object(session, "interrupt", new_callable=AsyncMock) as mock_interrupt:
+        await session.send_audio(b"\x00\x00" * 10)
+
+    mock_interrupt.assert_awaited_once()
+    session._session.send_realtime_input.assert_awaited_once()

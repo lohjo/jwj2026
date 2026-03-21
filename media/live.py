@@ -374,6 +374,8 @@ class InterruptibleLiveSession:
         if self._closed or not self._session:
             return
         try:
+            if self._model_speaking:
+                await self.interrupt()
             await self._session.send_realtime_input(
                 audio=types.Blob(
                     data=pcm_chunk, mime_type="audio/pcm;rate=16000"
