@@ -195,21 +195,22 @@ async def test_interrupt_unblocks_receive_audio_and_does_not_leak_subsequent_chu
     await ils._response_queue.put(chunk_before_2)
 
     received: list[bytes] = []
+    pre_interrupt_drained = asyncio.Event()
 
     async def _collect() -> None:
         async for chunk in ils.receive_audio():
             received.append(chunk)
+            # Once both pre-interrupt chunks have been consumed, signal the test
+            if len(received) == 2:
+                pre_interrupt_drained.set()
 
     # Start draining the queue in the background
     collect_task = asyncio.create_task(_collect())
 
     # Wait deterministically until both pre-interrupt chunks have been
-    # consumed (queue is empty), so we can be sure the consumer is now
-    # blocked waiting for the next item before we call interrupt().
-    for _ in range(100):
-        if ils._response_queue.empty():
-            break
-        await asyncio.sleep(0)  # yield to event loop
+    # consumed so we can be sure the consumer is now blocked waiting for
+    # the next item before we call interrupt().
+    await asyncio.wait_for(pre_interrupt_drained.wait(), timeout=1.0)
 
     # Interrupt — this sets _model_speaking=False and enqueues None
     await ils.interrupt()
