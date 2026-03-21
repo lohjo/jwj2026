@@ -2443,6 +2443,10 @@
                 laWorkletNode.disconnect();
                 laWorkletNode = null;
             }
+            if (laSilentGainNode) {
+                laSilentGainNode.disconnect();
+                laSilentGainNode = null;
+            }
             if (laMicSourceNode) {
                 laMicSourceNode.disconnect();
                 laMicSourceNode = null;
