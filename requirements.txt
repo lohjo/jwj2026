@@ -8,10 +8,10 @@ openai>=1.30
 google-genai>=1.0
 
 # Google ADK
-google-adk>=0.4
+google-adk>=1.0
 
 # Claude Code SDK
-claude-code-sdk>=0.0.25
+# claude-code-sdk>=0.0.25  # optional legacy dependency
 
 # Speech
 deepgram-sdk>=3.5

@@ -2227,6 +2227,22 @@
     let laMediaRecorder = null;
     let laCurrentTurnInterrupted = false;
 
+    // ── VAD state ───────────────────────────────────────────────
+    const VAD = {
+        THRESHOLD:         0.045,
+        FRAMES_TO_TRIGGER: 4,
+        HOLD_FRAMES:       8,
+        _activeCount:      0,
+        _holdCount:        0,
+        _triggered:        false,
+    };
+
+    function laResetVAD() {
+        VAD._activeCount = 0;
+        VAD._holdCount = 0;
+        VAD._triggered = false;
+    }
+
     function laSetStatus(text, color) {
         document.getElementById('la-status-text').textContent = text;
         document.getElementById('la-status-dot').style.background = color;
@@ -2305,6 +2321,7 @@
         btn.disabled = true;
 
         laWs.onopen = () => {
+            laResetVAD();
             // Wait for "connected" message from server
         };
 
@@ -2314,6 +2331,7 @@
                 switch (data.type) {
                     case 'connected':
                         laConnected = true;
+                        laResetVAD();
                         laSetStatus('Listening…', 'var(--green)');
                         btn.textContent = 'Disconnect';
                         btn.disabled = false;
@@ -2371,6 +2389,7 @@
     }
 
     function laDisconnect() {
+        laResetVAD();
         if (laWs) { laWs.close(); laWs = null; }
         laStopMic();
         laStopPlayback();
@@ -2483,8 +2502,9 @@ class PCMProcessor extends AudioWorkletProcessor {
         this._targetSamples = 1600;
         this._ratio         = sampleRate / this._targetRate;
 
-        // Fixed-size ring buffers (power-of-2 capacities → cheap bitwise-AND modulo).
-        // Avoids Array push/splice O(n) copies and GC pressure in the audio thread.
+        // CRITICAL: Ring buffer capacities (_srcCap, _pcmCap) MUST be powers of 2
+        // for bitwise-AND modulo. Keep this approach to avoid Array push/splice
+        // O(n) overhead and audio-thread GC pressure.
         this._srcCap   = 4096;
         this._srcBuf   = new Float32Array(this._srcCap);
         this._srcWrite = 0;
@@ -2648,8 +2668,8 @@ registerProcessor('pcm-processor', PCMProcessor);
             cancelAnimationFrame(laVisualizerRaf);
             laVisualizerRaf = null;
         }
-        // Signal end of user turn so the model responds
-        if (laWs && laConnected && laWs.readyState === WebSocket.OPEN) {
+        // Signal end of user turn only when model is not already speaking.
+        if (!laPlaying && laWs && laConnected && laWs.readyState === WebSocket.OPEN) {
             laWs.send(JSON.stringify({ type: 'end_turn' }));
         }
         // Keep the stream open so we can resume quickly
@@ -2664,6 +2684,7 @@ registerProcessor('pcm-processor', PCMProcessor);
 
     function laStopMic() {
         laMicActive = false;
+        laResetVAD();
         if (laWorkletNode) {
             laWorkletNode.port.onmessage = null;
             laWorkletNode.disconnect();
@@ -2772,7 +2793,25 @@ registerProcessor('pcm-processor', PCMProcessor);
             sum += normalized * normalized;
         }
         const rms = Math.sqrt(sum / int16Array.length);
-        return rms > 0.015;
+        const active = rms > VAD.THRESHOLD;
+
+        if (active) {
+            VAD._activeCount++;
+            VAD._holdCount = VAD.HOLD_FRAMES;
+        } else if (VAD._holdCount > 0) {
+            VAD._holdCount--;
+        } else {
+            VAD._activeCount = 0;
+        }
+
+        if (VAD._activeCount >= VAD.FRAMES_TO_TRIGGER && !VAD._triggered) {
+            VAD._triggered = true;
+            return true;
+        }
+        if (VAD._activeCount === 0 && VAD._holdCount === 0) {
+            VAD._triggered = false;
+        }
+        return false;
     }
 
     function laHandleBargein() {

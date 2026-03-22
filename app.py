@@ -903,9 +903,7 @@ async def websocket_live_agent(websocket: WebSocket):
                     except Exception:
                         return
                 try:
-                    if session.last_receive_interrupted:
-                        await websocket.send_json({"type": "interrupted"})
-                    elif sent_turn_start:
+                    if sent_turn_start:
                         await websocket.send_json({"type": "turn_end"})
                 except Exception:
                     return
