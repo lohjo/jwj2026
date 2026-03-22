@@ -17,6 +17,8 @@ from config import (
     GROQ_MODEL,
     GROQ_API_BASE,
     GOOGLE_GENAI_USE_VERTEXAI,
+    GOOGLE_CLOUD_PROJECT,
+    GOOGLE_CLOUD_LOCATION,
 )
 
 logger = logging.getLogger(__name__)
@@ -52,7 +54,19 @@ async def call_llm(prompt: str, max_tokens: int = 1024) -> tuple[str, str]:
     # ── Primary: Gemini ─────────────────────────────────────────────────
     try:
         if GOOGLE_GENAI_USE_VERTEXAI:
-            client = genai.Client()
+            project = GOOGLE_CLOUD_PROJECT
+            location = GOOGLE_CLOUD_LOCATION
+            if not project:
+                raise RuntimeError(
+                    "Missing required environment variable: GOOGLE_CLOUD_PROJECT "
+                    "(set in .env for local development or as an environment variable in production)"
+                )
+            if not location:
+                raise RuntimeError(
+                    "Missing required environment variable: GOOGLE_CLOUD_LOCATION "
+                    "(set in .env for local development or as an environment variable in production)"
+                )
+            client = genai.Client(vertexai=True, project=project, location=location)
         else:
             if not GEMINI_API_KEY or GEMINI_API_KEY.lower().startswith("your_"):
                 raise ValueError("GEMINI_API_KEY missing or placeholder")

@@ -318,8 +318,7 @@ class InterruptibleLiveSession:
     """Gemini Live API session with real-time interruption support.
 
     Designed for the WebSocket dashboard where audio chunks arrive
-    continuously and the user can interrupt the model mid-response
-    by speaking again.
+    continuously and the user can interrupt the model mid-response.
 
     Usage::
 
@@ -334,7 +333,7 @@ class InterruptibleLiveSession:
             async for audio_chunk in session.receive_audio():
                 ws.send_bytes(audio_chunk)
 
-            # User speaks again → model is interrupted automatically
+            # Continue streaming mic chunks.
             await session.send_audio(new_pcm_chunk)
     """
 
@@ -376,14 +375,15 @@ class InterruptibleLiveSession:
         )
 
     async def send_audio(self, pcm_chunk: bytes) -> None:
-        """Send a PCM16 audio chunk. Interrupts the model if it is speaking."""
+        """Send a PCM16 audio chunk without performing barge-in detection.
+
+        Barge-in detection is handled client-side (VAD + debounce). The client
+        sends an explicit ``{"type":"interrupt"}`` message which maps to
+        ``interrupt()``. This method only forwards audio chunks.
+        """
         if self._closed or not self._session:
             return
         try:
-            # Automatic barge-in: if the model is speaking and the user starts
-            # sending new mic audio, interrupt the current model turn first.
-            if self._model_speaking:
-                await self.interrupt()
             self._user_stream_open = True
             await self._session.send_realtime_input(
                 audio=types.Blob(

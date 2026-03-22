@@ -263,8 +263,8 @@ async def test_interrupt_while_session_closed_is_a_noop():
 
 
 @pytest.mark.asyncio
-async def test_send_audio_auto_interrupts_when_model_speaking():
-    """send_audio() should perform automatic barge-in when model is speaking."""
+async def test_send_audio_does_not_auto_interrupt():
+    """send_audio must NOT call interrupt() — barge-in is handled client-side."""
     ils = InterruptibleLiveSession(system_context="test")
     mock_live_session = AsyncMock()
     ils._session = mock_live_session
@@ -273,7 +273,7 @@ async def test_send_audio_auto_interrupts_when_model_speaking():
     with patch.object(ils, "interrupt", new=AsyncMock()) as mock_interrupt:
         await ils.send_audio(b"\x01\x02" * 100)
 
-    mock_interrupt.assert_awaited_once()
+    mock_interrupt.assert_not_awaited()
     mock_live_session.send_realtime_input.assert_awaited_once()
 
 
@@ -290,6 +290,21 @@ async def test_send_audio_does_not_interrupt_when_model_not_speaking():
 
     mock_interrupt.assert_not_awaited()
     mock_live_session.send_realtime_input.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_explicit_interrupt_message_calls_interrupt():
+    """Explicit interrupt path must still execute interrupt() behavior."""
+    ils = InterruptibleLiveSession(system_context="test")
+    ils._model_speaking = True
+    ils._session = AsyncMock()
+    ils._user_stream_open = False
+
+    await ils.interrupt()
+
+    assert ils._model_speaking is False
+    assert ils._response_queue.qsize() == 1
+    assert ils._response_queue.get_nowait() is None
 
 
 @pytest.mark.asyncio
