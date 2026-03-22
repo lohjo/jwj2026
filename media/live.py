@@ -352,7 +352,6 @@ class InterruptibleLiveSession:
         # at the start of every message and discards audio from older generations
         # so post-interrupt chunks never leak into the next receive_audio() call.
         self._generation: int = 0
-        self._interrupt_counter: int = 0
         self._last_receive_interrupted: bool = False
 
     async def __aenter__(self) -> "InterruptibleLiveSession":
@@ -468,7 +467,6 @@ class InterruptibleLiveSession:
             # Advance generation *before* draining so the receive_loop
             # will discard any audio it has not yet enqueued.
             self._generation += 1
-            self._interrupt_counter += 1
             self._model_speaking = False
 
             # Drain audio that was enqueued before we incremented the counter.
@@ -506,7 +504,7 @@ class InterruptibleLiveSession:
         Terminates when the model finishes its turn or is interrupted.
         Can be called again for the next turn.
         """
-        start_interrupt_counter = self._interrupt_counter
+        start_generation = self._generation
         self._last_receive_interrupted = False
         while True:
             try:
@@ -518,7 +516,7 @@ class InterruptibleLiveSession:
                 return
             if chunk is None:
                 self._last_receive_interrupted = (
-                    self._interrupt_counter > start_interrupt_counter
+                    self._generation > start_generation
                 )
                 return
             yield chunk
@@ -564,9 +562,9 @@ class InterruptibleLiveSession:
                 # receive_audio() call.
                 if message.server_content.interrupted:
                     logger.info("[Live API] Model interrupted by user")
-                    self._interrupt_counter += 1
+                    self._generation += 1
                     self._model_speaking = False
-                    if gen == self._generation:
+                    if gen == self._generation - 1:
                         await self._response_queue.put(None)
                     continue
 

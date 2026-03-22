@@ -909,6 +909,7 @@ async def websocket_live_agent(websocket: WebSocket):
                         await websocket.send_json({"type": "turn_end"})
                 except Exception:
                     return
+                sent_turn_start = False
         except asyncio.CancelledError:
             pass
         except Exception as e:
